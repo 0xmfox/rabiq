@@ -1,6 +1,7 @@
 // Published dossiers travel inside the link itself (deflate + base64url). No server stores them.
 import { blank, type Dossier, type Question } from './burrow.ts';
 import type { Snapshot } from './sources.ts';
+import { PHASES } from './chain.ts';
 
 export type Published = {
   v: 1;
@@ -70,7 +71,7 @@ function snapshotOf(s: any): Snapshot | undefined {
       block: num(c.block) ?? 0, name: str(c.name, 80), symbol: str(c.symbol, 24),
       launchpad: c.launchpad === 'pons-v2' ? 'pons-v2' : null,
       deployer: addrOrNull(c.deployer), feeRecipient: addrOrNull(c.feeRecipient), curve: addrOrNull(c.curve),
-      phase: c.phase === 'curve' || c.phase === 'graduated' ? c.phase : null, creatorTaxBps: num(c.creatorTaxBps),
+      phase: PHASES.includes(c.phase) ? c.phase : null, creatorTaxBps: num(c.creatorTaxBps),
     } : null,
     market: m && typeof m === 'object' ? {
       priceUsd: num(m.priceUsd), fdv: num(m.fdv), liquidityUsd: num(m.liquidityUsd), volume24h: num(m.volume24h),
@@ -80,7 +81,9 @@ function snapshotOf(s: any): Snapshot | undefined {
       repo: str(r?.repo, 140).toLowerCase().replace(/[^\w./-]/g, ''), sha: str(r?.sha, 40).replace(/[^0-9a-f]/gi, ''),
       message: str(r?.message, 140), committedAt: str(r?.committedAt, 40), pushedAt: str(r?.pushedAt, 40), stars: num(r?.stars) ?? 0, branch: str(r?.branch, 80),
     })),
-    launches: Array.isArray(s.launches) ? s.launches.slice(0, 40).filter((l: any) => isCa(l?.token)).map((l: any) => ({ token: l.token.toLowerCase(), symbol: str(l.symbol, 24) })) : null,
+    launchTotal: num(s.launchTotal),
+    curve: s.curve && typeof s.curve === 'object' && num(s.curve.priceEth) != null ? { priceEth: num(s.curve.priceEth)!, raisedEth: num(s.curve.raisedEth) ?? 0, thresholdEth: num(s.curve.thresholdEth) ?? 0, progress: Math.max(0, Math.min(1, num(s.curve.progress) ?? 0)), quote: str(s.curve.quote, 16) } : null,
+    launches: Array.isArray(s.launches) ? s.launches.slice(0, 41).filter((l: any) => isCa(l?.token)).map((l: any) => ({ token: l.token.toLowerCase(), symbol: str(l.symbol, 24) })) : null,
   };
 }
 

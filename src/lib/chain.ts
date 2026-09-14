@@ -66,9 +66,15 @@ export type ChainFacts = {
   deployer: string | null;
   feeRecipient: string | null;
   curve: string | null;
-  phase: 'curve' | 'graduated' | null;
+  // factory GraduationPhase: NotGraduated, Swept (curve drained, no pool yet), PoolCreated, Rescued
+  phase: 'curve' | 'swept' | 'graduated' | 'rescued' | null;
   creatorTaxBps: number | null;
+  pairToken?: string | null;
+  poolFee?: number | null;
+  tickSpacing?: number | null;
 };
+
+export const PHASES = ['curve', 'swept', 'graduated', 'rescued'] as const;
 
 export function normalizeAddress(input: string): string | null {
   const s = input.trim();
@@ -101,7 +107,10 @@ export async function readToken(ca: string): Promise<ChainFacts> {
     deployer: pons ? lower(pons.deployer) : null,
     feeRecipient: pons ? lower(pons.creatorFeeRecipient) : null,
     curve: pons ? lower(pons.curve) : null,
-    phase: pons ? (pons.phase === 0 ? 'curve' : 'graduated') : null,
+    phase: pons ? PHASES[pons.phase] ?? null : null,
     creatorTaxBps: pons ? Number(pons.creatorTaxBps) : null,
+    pairToken: pons ? pons.pairToken.toLowerCase() : null,
+    poolFee: pons ? Number(pons.poolFee) : null,
+    tickSpacing: pons ? Number(pons.tickSpacing) : null,
   };
 }

@@ -18,11 +18,20 @@ export function seedBlock(block: number) {
   if (!base && block) { base = block; baseAt = performance.now(); }
 }
 
+let noted = 0;
+/** A fresh head read elsewhere (the live desk) re-anchors the counter and skips the next own poll. */
+export function noteBlock(block: number) {
+  const now = performance.now();
+  if (base && block > base) rate = (block - base) / (now - baseAt);
+  if (block > base) { base = block; baseAt = now; }
+  noted = now;
+}
+
 export function startBlockTicker() {
   if (started) return;
   started = true;
   const poll = async () => {
-    if (!document.hidden || !base) {
+    if ((!document.hidden || !base) && performance.now() - noted > 8000) {
       const b = Number(await retry(() => client.getBlockNumber()).catch(() => 0n));
       const now = performance.now();
       if (b && base && b > base) rate = (b - base) / (now - baseAt);

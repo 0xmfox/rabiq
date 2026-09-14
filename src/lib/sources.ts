@@ -1,6 +1,9 @@
 // Market data (DexScreener), repositories (GitHub REST API) and Pons V2 launch history.
 import { client, launchEvent, MULTICALL3, PONS_V2_FACTORY, readToken, retry, type ChainFacts } from './chain.ts';
+import { curveStates, curveTrades, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY, type Curve } from './pons.ts';
 import { parseAbi, getAddress } from 'viem';
+
+const DAY_BLOCKS = 850_000n; // ~24h at the measured ~0.1 s block time
 
 export type Market = {
   priceUsd: number | null;
@@ -27,7 +30,9 @@ export type Snapshot = {
   chain: ChainFacts | null;
   market: Market | null;
   repos: RepoFacts[];
-  launches: Launch[] | null; // every Pons V2 token by the same deployer
+  launches: Launch[] | null; // the deployer's latest Pons V2 launches (up to 40), always including this token
+  launchTotal?: number | null; // all launches by the deployer
+  curve?: Curve | null; // bonding curve state while the token trades on the curve
 };
 
 export async function readMarket(ca: string): Promise<Market | null> {
@@ -104,10 +109,15 @@ export async function launchTokens(deployer: string, headBlock?: number): Promis
   return tokens;
 }
 
-export async function readLaunches(deployer: string, headBlock?: number): Promise<Launch[] | null> {
+/** The deployer's latest 40 launches plus `self` when it is older, and the total count. */
+export async function readLaunches(deployer: string, headBlock?: number, self?: string): Promise<{ list: Launch[]; total: number } | null> {
   try {
-    // ponytail: one symbol() call per launch; cap protects serial launchers
-    return await withSymbols((await launchTokens(deployer, headBlock)).slice(-40));
+    const all = (await launchTokens(deployer, headBlock)).map((t) => t.toLowerCase() as `0x${string}`);
+    if (self && !all.includes(self.toLowerCase() as `0x${string}`)) return null;
+    // ponytail: one symbol() call per shown launch; the cap keeps serial launchers readable
+    const pick = all.slice(-40);
+    if (self && !pick.includes(self.toLowerCase() as `0x${string}`)) pick.unshift(self.toLowerCase() as `0x${string}`);
+    return { list: await withSymbols(pick), total: all.length };
   } catch {
     return null;
   }
@@ -127,14 +137,41 @@ export async function takeSnapshot(ca: string, repoUrls: string[]): Promise<Snap
     readMarket(ca).catch(() => null),
     Promise.all(repos.map(readRepo)),
   ]);
-  let launches = chain?.deployer ? await readLaunches(chain.deployer, chain.block) : null;
-  // a token is always one of its own deployer's launches; anything else is a failed read, so try once more
-  if (chain?.deployer && launches && !launches.some((l) => l.token === ca.toLowerCase())) {
+  // a token is always one of its own deployer's launches; a list without it is a failed read, so try once more
+  let launches = chain?.deployer ? await readLaunches(chain.deployer, chain.block, ca) : null;
+  if (chain?.deployer && !launches) {
     await new Promise((r) => setTimeout(r, 2000));
-    launches = await readLaunches(chain.deployer, chain.block);
-    if (launches && !launches.some((l) => l.token === ca.toLowerCase())) launches = null;
+    launches = await readLaunches(chain.deployer, chain.block, ca);
   }
-  return { at: Date.now(), chain, market, repos: repoFacts.filter((r): r is RepoFacts => !!r), launches };
+  const { curve, market: ponsMarket } = chain?.launchpad ? await ponsMarketOf(ca, chain, market).catch(() => ({ curve: null, market: null })) : { curve: null, market: null };
+  return { at: Date.now(), chain, market: market ?? ponsMarket, repos: repoFacts.filter((r): r is RepoFacts => !!r), launches: launches?.list ?? null, launchTotal: launches?.total ?? null, curve };
+}
+
+/** DexScreener has no pair while a token is on the curve: price it from the curve reserves and its trades. */
+async function ponsMarketOf(ca: string, chain: ChainFacts, dex: Market | null): Promise<{ curve: Curve | null; market: Market | null }> {
+  const head = BigInt(chain.block || Number(await client.getBlockNumber()));
+  const quoteAddr = chain.pairToken ?? '0x0000000000000000000000000000000000000000';
+  await loadQuotes([quoteAddr]);
+  const quote = quoteOf(quoteAddr);
+  const dec = quote?.decimals ?? 18, usdPer = quote?.usd ?? null;
+  const sum = (ts: { amt: number }[]) => ts.reduce((s, t) => s + t.amt, 0);
+  if (chain.phase === 'curve' && chain.curve) {
+    const [state, trades] = await Promise.all([curveStates([chain.curve], () => dec), curveTrades(chain.curve, head - DAY_BLOCKS, head, dec)]);
+    const c = state.get(chain.curve) ?? null;
+    if (c) c.quote = quote?.symbol ?? '?';
+    if (!c || dex) return { curve: c, market: null };
+    return {
+      curve: c,
+      market: usdPer == null ? null : { priceUsd: c.priceEth * usdPer, fdv: c.priceEth * SUPPLY * usdPer, liquidityUsd: c.raisedEth * usdPer, volume24h: sum(trades) * usdPer, url: '' },
+    };
+  }
+  if (chain.phase === 'graduated' && !dex && chain.poolFee != null && chain.tickSpacing != null && usdPer != null) {
+    const trades = await poolTrades(poolId(ca, quoteAddr, chain.poolFee, chain.tickSpacing), ca, quoteAddr, head - DAY_BLOCKS, head, dec);
+    const last = trades[trades.length - 1];
+    if (!last) return { curve: null, market: null };
+    return { curve: null, market: { priceUsd: last.price * usdPer, fdv: last.price * SUPPLY * usdPer, liquidityUsd: null, volume24h: sum(trades) * usdPer, url: '' } };
+  }
+  return { curve: null, market: null };
 }
 
 export type Change = { text: string; tone: 'up' | 'down' | 'info' | 'warn'; href?: string };
@@ -154,7 +191,9 @@ export function diffSnapshots(prev: Snapshot, next: Snapshot): Change[] {
     out.push({ text: `Liquidity ${usd(pm.liquidityUsd)} → ${usd(nm.liquidityUsd)}`, tone: d > 0 ? 'up' : 'down' });
   }
   if (!pm && nm) out.push({ text: `Market appeared: FDV ${usd(nm.fdv)}`, tone: 'info' });
-  if (prev.chain?.phase === 'curve' && next.chain?.phase === 'graduated')
+  if (prev.chain?.phase === 'curve' && next.chain?.phase === 'swept')
+    out.push({ text: 'Curve completed: reserves swept, Uniswap v4 pool pending', tone: 'up' });
+  if (prev.chain?.phase !== 'graduated' && prev.chain?.phase && next.chain?.phase === 'graduated')
     out.push({ text: 'Graduated from the Pons curve to a Uniswap v4 pool', tone: 'up' });
   if (prev.chain?.feeRecipient && next.chain?.feeRecipient && prev.chain.feeRecipient !== next.chain.feeRecipient)
     out.push({ text: `Fee recipient changed to ${short(next.chain.feeRecipient)}`, tone: 'warn' });

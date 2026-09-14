@@ -3,6 +3,9 @@ import { EXPLORER, normalizeAddress, readToken, type ChainFacts } from './lib/ch
 import { blockText, seedBlock } from './lib/live.ts';
 import { esc } from './lib/md.ts';
 import { launchTokens, readFreshLaunches, readMarket, short, ticker, usd, withSymbols } from './lib/sources.ts';
+import { change, mcap, onDesk, rank, stats } from './lib/desk.ts';
+import { sparkline, usdShort } from './chart.ts';
+import { mountRail } from './docs.ts';
 
 const REPO_URL = 'https://github.com/0xmfox/rabiq';
 const X_URL = 'https://x.com/0xMfox';
@@ -24,13 +27,9 @@ const jump = (id: string, text: string) => `<a href="#/" data-jump="${id}">${tex
 
 export function landingHTML() {
   const row = (key: string, label: string) => `<div class="file-row" data-row="${key}"><dt>${label}</dt><dd><span class="skeleton"></span></dd></div>`;
+  const rail = [['file', 'Live file'], ['now', 'Right now'], ['number', 'The number'], ['serial', 'Serial launchers'], ['how', 'How it works'], ['token', '$RABIQ']];
   return `<div class="lp">
-  <header class="lp-nav"><div class="lp-wrap">
-    <a class="brand" href="#/"><img src="rabiq-256.png" alt=""><span>RABIQ</span></a>
-    <nav class="lp-links">${jump('file', 'Live file')}${jump('number', 'The number')}${jump('serial', 'Serial launchers')}</nav>
-    <div class="lp-nav-end"><a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a><a href="${X_URL}" target="_blank" rel="noopener">X</a><a class="btn primary sm" href="#/app">Open app</a></div>
-  </div></header>
-
+  <aside class="rail lp-rail" data-rail><span class="rail-title">Case files</span>${rail.map(([id, label], i) => `<a href="#/" data-jump="${id}"><span>${String(i).padStart(2, '0')}</span><em>${label}</em></a>`).join('')}<i class="rail-fill"></i></aside>
   <section class="lp-hero lp-wrap" id="file">
     <div class="lp-hero-copy">
       <p class="lp-label rv" style="--i:0"><span>File 00</span>Pons V2 · Robinhood Chain</p>
@@ -55,8 +54,29 @@ export function landingHTML() {
     </div>
   </section>
 
+  <section class="lp-now lp-wrap" id="now" data-reveal>
+    <p class="lp-label rv" style="--i:0"><span>File 01</span>Right now on Pons V2</p>
+    <div class="now-grid">
+      <div>
+        <h2 class="lp-h2 rv" style="--i:1">The last ten minutes on Pons V2.</h2>
+        <p class="lp-sub rv" style="--i:2">RABIQ reads every launch and every bonding-curve trade from Robinhood Chain, every five seconds.</p>
+        <dl class="now-stats">
+          <div class="rv" style="--i:3"><dt>Launches · 10m</dt><dd data-now="launches"><span class="skeleton"></span></dd></div>
+          <div class="rv" style="--i:4"><dt>Curve trades · 10m</dt><dd data-now="trades"><span class="skeleton"></span></dd></div>
+          <div class="rv" style="--i:5"><dt>Volume · 10m</dt><dd data-now="volume"><span class="skeleton"></span></dd></div>
+          <div class="rv" style="--i:6"><dt>From repeat deployers</dt><dd data-now="repeat" class="amber"><span class="skeleton"></span></dd></div>
+        </dl>
+        <a class="btn primary lg rv" style="--i:7" href="#/app">Open the live desk</a>
+      </div>
+      <div class="now-board rv" style="--i:3">
+        <div class="now-head"><span>Most traded · 10m</span><span class="file-block"><i></i>Block <b data-block>${blockText()}</b></span></div>
+        <div data-now="board">${Array.from({ length: 6 }, () => '<div class="now-row"><span class="skeleton"></span></div>').join('')}</div>
+      </div>
+    </div>
+  </section>
+
   <section class="lp-number lp-wrap" id="number" data-reveal>
-    <p class="lp-label rv" style="--i:0"><span>File 01</span>The number</p>
+    <p class="lp-label rv" style="--i:0"><span>File 02</span>The number</p>
     <div class="num-grid">
       <div class="num-big rv" style="--i:1"><span data-count="launchedBeforePct" data-decimals="1">0</span><small>%</small></div>
       <p class="num-text rv" style="--i:2">of Pons V2 launches from wallets came from a wallet that had already launched a token before.</p>
@@ -71,10 +91,38 @@ export function landingHTML() {
   </section>
 
   <section class="lp-serial lp-wrap" id="serial" data-reveal>
-    <p class="lp-label rv" style="--i:0"><span>File 02</span>Serial launchers</p>
+    <p class="lp-label rv" style="--i:0"><span>File 03</span>Serial launchers</p>
     <h2 class="lp-h2 rv" style="--i:1">The same wallets keep launching.</h2>
     <p class="lp-sub rv" style="--i:2" data-f="serial-sub">Each row follows one wallet across the whole life of Pons V2. Lime marks a token that graduated from the bonding curve.</p>
     <div class="tracks" data-f="tracks"></div>
+  </section>
+
+  <section class="lp-how lp-wrap" id="how" data-reveal>
+    <p class="lp-label rv" style="--i:0"><span>File 04</span>How it works</p>
+    <h2 class="lp-h2 rv" style="--i:1">From a contract address to a decision.</h2>
+    <ol class="how-steps">
+      <li class="rv" style="--i:2"><span class="how-n">01</span><h3>Read the launch</h3><p>The Pons V2 factory record gives the deployer, the fee recipient, the curve, the quote asset and the phase.</p><code>getLaunchedToken(token)</code></li>
+      <li class="rv" style="--i:3"><span class="how-n">02</span><h3>Replay every trade</h3><p>Every CurveBuy and CurveSell since launch, then the Uniswap v4 swaps after graduation, drawn as candles.</p><code>CurveBuy · CurveSell · Swap</code></li>
+      <li class="rv" style="--i:4"><span class="how-n">03</span><h3>Count the deployer</h3><p>Every TokenLaunched event from the same wallet. The file gets a stamp: first launch, or how many came before.</p><code>TokenLaunched(deployer)</code></li>
+      <li class="rv" style="--i:5"><span class="how-n">04</span><h3>Write it down</h3><p>Thesis, open questions, a decision. Next time the deployer launches, RABIQ puts your notes in front of you.</p><code>Watching · Passed · Publish</code></li>
+    </ol>
+    <div class="how-links rv" style="--i:6"><a class="btn lg" href="#/how">How to use</a><a class="btn ghost lg" href="#/docs">Read the docs</a></div>
+  </section>
+
+  <section class="lp-token lp-wrap" id="token" data-reveal>
+    <div class="token-card rv" style="--i:0">
+      <img src="rabiq-cut.png" alt="" width="518" height="900" class="token-bunny">
+      <div>
+        <p class="lp-label"><span>File 05</span>The token</p>
+        <h2 class="token-name">$RABIQ</h2>
+        <dl class="token-facts">
+          <div><dt>Chain</dt><dd>Robinhood Chain · 4663</dd></div>
+          <div><dt>Launchpad</dt><dd>Pons V2</dd></div>
+          <div><dt>Contract</dt><dd>Announced at launch</dd></div>
+        </dl>
+        <div class="lp-cta"><a class="btn primary lg" href="${X_URL}" target="_blank" rel="noopener">Follow @0xMfox</a><a class="btn lg" href="${REPO_URL}" target="_blank" rel="noopener">Source on GitHub</a></div>
+      </div>
+    </div>
   </section>
 
   <section class="lp-end lp-wrap" data-reveal>
@@ -240,6 +288,33 @@ function tracksHTML(d: LandingData) {
   return `${rows}<div class="track axis"><div></div><div class="track-axis"><span>${day(first[1])}</span><span>${day(mid[1])}</span><span>${day(last[1])}</span></div></div>`;
 }
 
+// ---------- right now ----------
+function mountNow(root: HTMLElement, alive: () => boolean) {
+  const q = (k: string) => root.querySelector<HTMLElement>(`[data-now="${k}"]`)!;
+  let counted = false;
+  return onDesk(() => {
+    if (!alive()) return;
+    const st = stats();
+    const set = (k: string, v: number, text: (n: number) => string) => {
+      const el = q(k);
+      if (!counted && !reduced()) {
+        const start = performance.now();
+        const step = (now: number) => { const p = Math.min(1, (now - start) / 1200); el.textContent = text(v * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+        requestAnimationFrame(step);
+      } else el.textContent = text(v);
+    };
+    set('launches', st.launches, (n) => fmt(n));
+    set('trades', st.trades, (n) => fmt(n));
+    set('volume', st.volumeUsd, (n) => usdShort(n));
+    q('repeat').textContent = st.repeatShare == null ? 'Counting' : `${st.repeatShare.toFixed(1)}%`;
+    counted = true;
+    q('board').innerHTML = rank('hot').slice(0, 6).map((t, i) => {
+      const ch = change(t);
+      return `<a class="now-row" href="#/d/${t.token}" style="--i:${i}"><span class="n">${String(i + 1).padStart(2, '0')}</span><b>${esc(ticker(t.symbol))}</b><span class="mono">${usdShort(mcap(t))}</span><span class="mono ${ch == null ? '' : ch >= 0 ? 'lime' : 'red'}">${ch == null ? '' : `${ch >= 0 ? '+' : ''}${Math.abs(ch) >= 1000 ? fmt(ch) : ch.toFixed(1)}%`}</span>${sparkline(t.trades.map((x) => x.price))}<span class="dep ${t.earlier ? 'warn' : 'first'}">${t.earlier == null ? '' : t.earlier ? `${fmt(t.earlier)} earlier` : 'First launch'}</span></a>`;
+    }).join('');
+  });
+}
+
 export function mountLanding(root: HTMLElement): () => void {
   let live = true;
   const alive = () => live && root.isConnected;
@@ -247,6 +322,8 @@ export function mountLanding(root: HTMLElement): () => void {
 
   requestAnimationFrame(() => root.querySelector('.lp')!.classList.add('ready'));
   const stopFile = mountFile(root, data, alive);
+  const stopNow = mountNow(root, alive);
+  const stopRail = mountRail(root);
 
   data.then((d) => {
     if (!d || !alive()) return;
@@ -303,6 +380,8 @@ export function mountLanding(root: HTMLElement): () => void {
   return () => {
     live = false;
     stopFile();
+    stopNow();
+    stopRail();
     io.disconnect();
     root.removeEventListener('click', onJump);
     window.removeEventListener('pointermove', onMove);

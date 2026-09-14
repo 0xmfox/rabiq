@@ -92,7 +92,7 @@ textarea.field { resize: vertical; min-height: 88px; line-height: 1.55; }
 .block-live b { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
 /* top bar */
-.top { position: sticky; top: 0; z-index: 20; background: rgba(10, 14, 9, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+.top { z-index: 20; background: rgba(10, 14, 9, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
 .top .row { display: flex; align-items: center; gap: 24px; height: 60px; padding: 0 24px; max-width: 1440px; margin: 0 auto; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand img { width: 30px; height: 30px; border-radius: 7px; }
@@ -104,12 +104,10 @@ textarea.field { resize: vertical; min-height: 88px; line-height: 1.55; }
 .top nav { display: flex; gap: 22px; margin-left: auto; }
 .top nav a { position: relative; font-size: 13.5px; color: var(--muted); transition: color 0.15s ease; }
 .top nav a.on, .top nav a:hover { color: var(--text); }
-.top nav a.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -20px; height: 2px; border-radius: 2px; background: var(--lime); }
 @media (max-width: 1100px) { .top .block-live { display: none; } }
 @media (max-width: 860px) {
   .top .row { flex-wrap: wrap; height: auto; padding-block: 10px; row-gap: 10px; }
   .dig { order: 3; max-width: none; flex-basis: 100%; }
-  .top nav a.on::after { bottom: -6px; }
 }
 
 /* layout */
@@ -273,6 +271,10 @@ div.wire-row { cursor: default; }
 .launches a:hover { color: var(--text) !important; }
 .launches a.known { color: var(--lime) !important; }
 .launches a.self { color: var(--text) !important; }
+.launch-total { display: block; margin-bottom: 4px; font: 12.5px/1.4 var(--mono); color: var(--dim); }
+.curve-bar { display: block; height: 4px; margin: 8px 0 6px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.curve-bar i { display: block; height: 100%; width: calc(var(--p) * 100%); min-width: 2px; border-radius: 2px; background: var(--lime); }
+.small { font-size: 12.5px; }
 
 .statuses { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; }
 .statuses::before { content: ''; position: absolute; left: 4px; top: 4px; bottom: 4px; width: calc((100% - 8px) / 4); border-radius: 7px; background: var(--surface-2); border: 1px solid var(--border-2); transform: translateX(calc(var(--idx, 0) * 100%)); }

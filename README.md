@@ -53,14 +53,18 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 | Live site | **WORKING** | [rabiq.vercel.app](https://rabiq.vercel.app): a landing page that opens a case file on the newest Pons V2 launch, then the app |
 | Launch census | **WORKING** | `scripts/landing-data.ts` reads every `TokenLaunched` event, tells wallets from contracts by bytecode and counts repeat launchers |
 | Token dossier | **WORKING** | Paste a CA → one dossier per chain + address, so identical tickers never mix |
-| On-chain facts | **WORKING** | Pons V2 factory `getLaunchedToken` → deployer, fee recipient, phase, creator tax |
+| On-chain facts | **WORKING** | Pons V2 factory `getLaunchedToken` → deployer, fee recipient, phase (curve, swept, graduated, rescued), creator tax; curve price and progress from `getReserves` |
 | Deployer memory | **WORKING** | Every `TokenLaunched` by the same deployer; RABIQ highlights tokens already in your burrow |
 | RABIQ remembers | **WORKING** | Opening a dossier surfaces connected dossiers with their thesis, decision and first open question |
 | Since last check | **WORKING** | FDV and liquidity moves, curve → pool graduation, fee recipient change, new commits with a compare link, new launches by the deployer |
 | Strings | **WORKING** | Dossiers link through a shared deployer, fee recipient or GitHub repo (**confirmed**) or through your own notes (**hypothesis**) |
 | Graph | **WORKING** | All dossiers as draggable nodes and connections |
 | Publish / Save to my brain | **WORKING** | A dossier is packed into the link itself. Status, reason and notes stay private unless you opt in |
-| Live wire | **WORKING** | The newest Pons V2 launches on the app home, refreshed every 20 seconds, next to the live block height |
+| Live desk | **WORKING** | Every Pons V2 launch and every bonding-curve trade of the last ten minutes, read every five seconds: market cap, curve progress, buys and sells, volume, wallets, sparkline and the deployer's earlier launches per token |
+| Charts | **WORKING** | Market cap candles from every `CurveBuy` / `CurveSell` since launch, continued with Uniswap v4 `Swap` events after graduation; trade-count or time candles |
+| Quote assets | **WORKING** | Launches paired with USDG, cbBTC or tokenized stocks are priced in their own asset (decimals read on-chain, USD from DexScreener) |
+| Ticker tape | **WORKING** | The most traded tokens of the last ten minutes, on every page |
+| How to use + Docs | **WORKING** | [rabiq.vercel.app/#/how](https://rabiq.vercel.app/#/how) and [#/docs](https://rabiq.vercel.app/#/docs): every data source, contract and formula |
 | Markdown export | **WORKING** | Any dossier as an Obsidian-friendly note with frontmatter; all dossiers as JSON |
 | CLI | **WORKING** | `rabiq dig`, `rabiq recall`, `rabiq demo` over a folder of Markdown notes |
 | Demo dossiers | **WORKING** | Four synthetic dossiers, labelled as demo, no network requests |
@@ -350,6 +354,13 @@ src/lib/share.ts     publish links, sanitising, Save to my brain merge
 src/lib/burrow.ts    dossier model, localStorage, Markdown export
 src/lib/demo.ts      synthetic demo burrow
 src/lib/live.ts      live block height shared by every page
+src/lib/pons.ts      bonding curve state, curve trades, v4 pool swaps, quote assets
+src/lib/desk.ts      live market store: launches and trades in a rolling window
+src/deskview.ts      live desk: tiles, table, inspector, trade tape
+src/chart.ts         sparklines and candle charts
+src/dossierlive.ts   dossier market block and deployer constellation
+src/chrome.ts        header, ticker tape, cursor
+src/docs.ts          How to use and Docs pages
 src/landing.ts       landing page: live case file, the number, serial launchers
 src/main.ts          web app
 src/graph.ts         burrow graph

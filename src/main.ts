@@ -1,4 +1,9 @@
 import './style.css';
+import './desk.css';
+import { mountChrome, syncChrome, REPO_URL, X_URL } from './chrome.ts';
+import { deskHTML, mountDesk } from './deskview.ts';
+import { docsHTML, mountDocs } from './docs.ts';
+import { dossierLiveHTML, mountDossierLive } from './dossierlive.ts';
 import * as burrow from './lib/burrow.ts';
 import { STATUSES, latest, type Dossier } from './lib/burrow.ts';
 import { EXPLORER, normalizeAddress } from './lib/chain.ts';
@@ -6,22 +11,20 @@ import { demoBurrow } from './lib/demo.ts';
 import { findLinks, linksOf, type Link } from './lib/links.ts';
 import { esc, md } from './lib/md.ts';
 import { adopt, pack, publish, unpack, type Published } from './lib/share.ts';
-import { diffSnapshots, readFreshLaunches, short, takeSnapshot, ticker, usd, type Launch } from './lib/sources.ts';
+import { diffSnapshots, short, takeSnapshot, ticker, usd } from './lib/sources.ts';
 import { renderGraph } from './graph.ts';
 import { landingHTML, mountLanding } from './landing.ts';
-import { blockText, seedBlock, startBlockTicker } from './lib/live.ts';
+import { seedBlock, startBlockTicker } from './lib/live.ts';
 
-export const REPO_URL = 'https://github.com/0xmfox/rabiq';
-export const X_URL = 'https://x.com/0xMfox';
+export { REPO_URL, X_URL };
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const loading = new Set<string>();
 const failed = new Set<string>();
-let fresh: Launch[] | null = null;
 let filter = '';
 let notesEdit = false;
 let shared: Published | null = null;
 let unmountLanding: (() => void) | null = null;
-let freshNew = new Set<string>();
+let unmountDesk: (() => void) | null = null;
 let statusSlide: { id: string; from: number } | null = null;
 let justAdded = '';
 
@@ -39,6 +42,8 @@ const ago = (t: number) => {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 };
+const phaseLabel = (p: string | null | undefined) =>
+  ({ curve: 'Bonding curve', swept: 'Curve completed · pool pending', graduated: 'Graduated · Uniswap v4 pool', rescued: 'Rescued · reserves released' } as Record<string, string>)[p ?? ''] ?? '—';
 const addrLink = (a: string | null | undefined) =>
   a ? `<a href="${EXPLORER}/address/${a}" target="_blank" rel="noopener noreferrer" title="${a}">${short(a)}</a>` : '—';
 const route = () => location.hash.replace(/^#/, '') || '/';
@@ -77,7 +82,7 @@ async function refresh(d: Dossier, force = false) {
     const cur = burrow.get(d.id) ?? d;
     if (!snap.chain && !snap.market) failed.add(d.id);
     const prev = latest(cur);
-    if (!snap.launches && prev?.launches && prev.chain?.deployer === snap.chain?.deployer) snap.launches = prev.launches;
+    if (!snap.launches && prev?.launches && prev.chain?.deployer === snap.chain?.deployer) { snap.launches = prev.launches; snap.launchTotal = prev.launchTotal; }
     const changes = prev ? diffSnapshots(prev, snap) : [];
     // keep the previous check around until something actually moves, so "since last check" survives reloads
     if (prev && !changes.length && cur.snapshots.length > 1) cur.snapshots[cur.snapshots.length - 1] = snap;
@@ -89,30 +94,6 @@ async function refresh(d: Dossier, force = false) {
   } finally {
     loading.delete(d.id);
     render();
-  }
-}
-
-let freshLoading = false;
-async function loadFresh() {
-  // background tabs skip the periodic refresh, but the first read always runs
-  if (freshLoading || (document.hidden && fresh !== null)) return;
-  freshLoading = true;
-  try {
-    const next = await readFreshLaunches(8);
-    const seen = new Set(fresh?.map((l) => l.token));
-    const changed = !fresh || next.map((l) => l.token).join() !== fresh.map((l) => l.token).join();
-    freshNew = fresh ? new Set(next.filter((l) => !seen.has(l.token)).map((l) => l.token)) : new Set();
-    fresh = next;
-    if (!changed || route() !== '/app') return;
-    // a re-render would wipe an address the visitor is typing; the next render picks the rows up
-    const active = document.activeElement as HTMLInputElement | null;
-    if (active?.name === 'ca' && active.value) return;
-    render();
-    setTimeout(() => freshNew.clear(), 1500);
-  } catch {
-    if (fresh === null) { fresh = []; if (route() === '/app') render(); }
-  } finally {
-    freshLoading = false;
   }
 }
 
@@ -132,19 +113,14 @@ function publishedLinks(d: Dossier, all: Dossier[], links: Link[]): Published['l
 }
 
 // ---------- views ----------
-function shell(main: string) {
+function shell(main: string, full = false) {
   const all = burrow.all();
   const r = route();
   const q = filter.toLowerCase();
   const list = all.filter((d) => !q || d.symbol.toLowerCase().includes(q) || d.ca.includes(q) || d.name.toLowerCase().includes(q));
   const current = r.startsWith('/d/') ? burrow.idFor(r.slice(3)) : '';
+  if (full) return `<div class="layout full"><main class="page${once('page')}">${main}</main></div>`;
   return `
-  <header class="top"><div class="row">
-    <a class="brand" href="#/"><img src="rabiq-256.png" alt=""><span>RABIQ</span></a>
-    <form class="dig" data-form="dig"><span class="dig-prefix">CA</span><input class="field" name="ca" placeholder="Paste a Robinhood Chain contract address" autocomplete="off" spellcheck="false"><button class="btn primary sm">Open file</button></form>
-    <nav><a href="#/app" class="${r === '/app' || r.startsWith('/d/') ? 'on' : ''}">Dossiers</a><a href="#/graph" class="${r === '/graph' ? 'on' : ''}">Graph</a><a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a><a href="${X_URL}" target="_blank" rel="noopener">X</a></nav>
-    <span class="block-live" title="Robinhood Chain block height"><i></i><b data-block>${blockText()}</b></span>
-  </div></header>
   <div class="layout">
     <aside class="side">
       <div class="side-head"><span>Dossiers</span><span class="count">${all.length}</span></div>
@@ -165,25 +141,29 @@ function shell(main: string) {
   </div>`;
 }
 
-function homeView() {
-  const rows = fresh === null
-    ? Array.from({ length: 6 }, (_, i) => `<div class="wire-row" style="--i:${i}"><span class="wire-n">${String(i + 1).padStart(2, '0')}</span><span class="skeleton"></span></div>`).join('')
-    : fresh.length
-      ? fresh.map((l, i) => `<button class="wire-row${freshNew.has(l.token) ? ' new' : ''}" data-act="dig" data-ca="${l.token}" style="--i:${i}">
-          <span class="wire-n">${String(i + 1).padStart(2, '0')}</span><span class="wire-sym">${esc(ticker(l.symbol))}</span><span class="wire-ca">${short(l.token)}</span><span class="wire-go">Open file</span></button>`).join('')
-      : '<div class="empty-line">No launches in the last few minutes.</div>';
+function filesView() {
+  const all = burrow.all().sort((a, b) => (latest(b)?.at ?? b.createdAt) - (latest(a)?.at ?? a.createdAt));
+  const cards = all.map((d, i) => {
+    const s = latest(d), q = d.questions.find((x) => !x.done);
+    return `<a class="fcard" href="#/d/${d.ca}" style="--i:${Math.min(i, 12)}">
+      <span class="fcard-top"><b>${esc(ticker(d.symbol || '?'))}</b><span class="tag st-${d.status}">${statusLabel(d.status)}</span></span>
+      <span class="fcard-ca mono">${short(d.ca)}${d.demo ? ' · demo' : ''}</span>
+      <span class="fcard-thesis">${esc(d.thesis.slice(0, 120) || 'No thesis yet.')}</span>
+      <span class="fcard-foot"><span>${s?.market?.fdv != null ? `FDV ${usd(s.market.fdv)}` : 'Not checked'}</span>${s?.launchTotal ? `<span>${s.launchTotal} deployer launches</span>` : ''}${q ? `<span class="q">? ${esc(q.text.slice(0, 48))}</span>` : ''}</span>
+    </a>`;
+  }).join('');
   return `<div class="home">
     <section class="home-hero${once('home')}">
-      <p class="label"><span>File index</span>Pons V2 · Robinhood Chain</p>
+      <p class="label"><span>File index</span>Your burrow</p>
       <h1 class="display">Open a file<em>.</em></h1>
       <p class="lede">Paste any contract address. RABIQ reads the launch record, the market and the repository, then lists every other token the same wallet launched.</p>
       <form class="dig big" data-form="dig"><input class="field" name="ca" placeholder="0x… contract address" autocomplete="off" spellcheck="false"><button class="btn primary">Open file</button></form>
-      <div class="home-alt"><button class="link" data-act="demo">Load demo dossiers</button><a href="#/graph">Open the graph</a></div>
+      <div class="home-alt"><a href="#/app">Pick a token from the live desk</a><button class="link" data-act="demo">Load demo dossiers</button><a href="#/graph">Open the graph</a></div>
       <img class="home-bunny" src="rabiq-cut.png" alt="" width="518" height="900">
     </section>
-    <section class="wire${once(`wire:${fresh === null ? 'wait' : 'ready'}`)}">
-      <div class="wire-head"><span class="label"><span>Live wire</span>Newest Pons V2 launches</span><span class="block-live"><i></i>Block <b data-block>${blockText()}</b></span></div>
-      <div class="wire-list">${rows}</div>
+    <section class="files${once('files')}">
+      <div class="wire-head"><span class="label"><span>Dossiers</span>${all.length} in this browser</span><span class="muted small">Stored locally · Export from the sidebar</span></div>
+      ${cards ? `<div class="fgrid">${cards}</div>` : '<div class="empty-line" style="padding:22px 0">No dossiers yet. Open a file on any contract, or pick one from the live desk.</div>'}
     </section>
   </div>`;
 }
@@ -205,28 +185,28 @@ function factsCard(d: Dossier, all: Dossier[]) {
     ${failed.has(d.id) ? '<p class="red">Could not read this address from Robinhood Chain or DexScreener. Check the CA.</p>' : ''}
     <dl class="facts${s && !busy ? once(`facts:${d.id}:${s.at}`) : ''}">
       <dt>Launchpad</dt><dd>${v(c?.launchpad === 'pons-v2' ? 'Pons V2' : c ? 'Not a Pons V2 launch' : '—')}</dd>
-      <dt>Phase</dt><dd>${v(c?.phase === 'graduated' ? 'Graduated · Uniswap v4 pool' : c?.phase === 'curve' ? 'Bonding curve' : '—')}</dd>
+      <dt>Phase</dt><dd>${v(phaseLabel(c?.phase))}${s?.curve && c?.phase === 'curve' ? `<span class="curve-bar" style="--p:${s.curve.progress}"><i></i></span><span class="muted mono small">${s.curve.raisedEth.toLocaleString('en-US', { maximumFractionDigits: 3 })} / ${s.curve.thresholdEth.toLocaleString('en-US')} ${esc(s.curve.quote ?? 'ETH')} to graduate · ${(s.curve.progress * 100).toFixed(1)}%</span>` : ''}</dd>
       <dt>Deployer</dt><dd>${v(addrLink(c?.deployer))}</dd>
       <dt>Fee recipient</dt><dd>${v(c?.feeRecipient === c?.deployer && c?.deployer ? `${addrLink(c?.feeRecipient)} <span class="muted">(deployer)</span>` : addrLink(c?.feeRecipient))}</dd>
       <dt>Creator tax</dt><dd>${v(c?.creatorTaxBps != null ? `${c.creatorTaxBps / 100}%` : '—')}</dd>
       <dt>FDV · Liquidity</dt><dd>${v(m ? `${usd(m.fdv)} · ${usd(m.liquidityUsd)}` : '—')}</dd>
       <dt>Volume 24h</dt><dd>${v(m ? usd(m.volume24h) : '—')}</dd>
-      <dt>Deployer launches</dt><dd>${v(launches)}</dd>
+      <dt>Deployer launches</dt><dd>${v(s?.launchTotal ? `<span class="launch-total">${s.launchTotal.toLocaleString()} total${s.launchTotal > (s.launches?.length ?? 0) ? ` · latest ${Math.min(40, s.launchTotal)} shown` : ''}</span>${launches}` : launches)}</dd>
       ${s?.repos.map((r) => `<dt>GitHub</dt><dd><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener noreferrer">${esc(r.repo)}</a> · <code>${esc(r.sha.slice(0, 7))}</code> · ${esc(r.message)} · ★${r.stars}</dd>`).join('') ?? ''}
     </dl></section>`;
 }
 
-function listBlock(d: Dossier, key: 'pros' | 'cons' | 'checked', placeholder: string, readonly: boolean) {
+function listBlock(d: Dossier, key: 'pros' | 'cons' | 'checked', placeholder: string, locked: boolean) {
   const xs = d[key];
-  return `<ul class="items ${key}">${xs.map((x, i) => `<li class="${justAdded === `${key}:${x}` ? 'add' : ''}"><span>${esc(x)}</span>${readonly ? '' : `<button class="x" data-act="del-item" data-list="${key}" data-i="${i}" title="Remove">✕</button>`}</li>`).join('') || `<li class="empty-line">None yet</li>`}</ul>
-    ${readonly ? '' : `<form class="adder" data-form="add" data-list="${key}"><input class="field" name="text" placeholder="${placeholder}" autocomplete="off"><button class="btn sm">Add</button></form>`}`;
+  return `<ul class="items ${key}">${xs.map((x, i) => `<li class="${justAdded === `${key}:${x}` ? 'add' : ''}"><span>${esc(x)}</span>${locked ? '' : `<button class="x" data-act="del-item" data-list="${key}" data-i="${i}" title="Remove">✕</button>`}</li>`).join('') || `<li class="empty-line">None yet</li>`}</ul>
+    ${locked ? '' : `<form class="adder" data-form="add" data-list="${key}"><input class="field" name="text" placeholder="${placeholder}" autocomplete="off"><button class="btn sm">Add</button></form>`}`;
 }
 
-function dossierView(d: Dossier, opts: { readonly?: boolean; publishedLinks?: Published['links'] } = {}) {
+function dossierView(d: Dossier, opts: { locked?: boolean; publishedLinks?: Published['links'] } = {}) {
   const all = burrow.all();
-  const links = findLinks(opts.readonly ? all.concat(all.some((x) => x.id === d.id) ? [] : [d]) : all);
+  const links = findLinks(opts.locked ? all.concat(all.some((x) => x.id === d.id) ? [] : [d]) : all);
   const mine = linksOf(d.id, links);
-  const ro = !!opts.readonly;
+  const ro = !!opts.locked;
   const s = latest(d), prev = d.snapshots[d.snapshots.length - 2];
   const changes = s && prev ? diffSnapshots(prev, s) : [];
   const firstOpen = d.questions.findIndex((q) => !q.done);
@@ -276,6 +256,7 @@ function dossierView(d: Dossier, opts: { readonly?: boolean; publishedLinks?: Pu
         </div>
       </div>`}
     </section>
+    ${ro ? '' : dossierLiveHTML(d.ca, s, once(`dlive:${d.id}`) !== '')}
     ${memory}${since}
     <div class="grid">
       <div class="col">
@@ -317,7 +298,7 @@ function sharedView(p: Published) {
   return `<div class="dossier">
     <section class="shared${once('shared')}"><span class="verdict published">Published</span><div class="grow"><h3>Published dossier${p.author ? ` by @${esc(p.author)}` : ''}</h3><span class="muted">${p.at ? new Date(p.at).toLocaleString() : ''} · Status and private notes are not included unless the author added them</span></div>
       <button class="btn primary" data-act="adopt">${mineAlready ? 'Merge into my dossier' : 'Save to my brain'}</button></section>
-    ${dossierView(temp, { readonly: true, publishedLinks: p.links })}
+    ${dossierView(temp, { locked: true, publishedLinks: p.links })}
   </div>`;
 }
 
@@ -359,7 +340,10 @@ function publishDialog(d: Dossier) {
 // ---------- render ----------
 async function render() {
   const r = route();
+  syncChrome(r);
   if (r === '/') {
+    unmountDesk?.();
+    unmountDesk = null;
     // the landing runs its own live reads; re-rendering it would restart them
     if (!unmountLanding) { app.innerHTML = landingHTML(); unmountLanding = mountLanding(app); }
     return;
@@ -369,7 +353,10 @@ async function render() {
   const focus = document.activeElement as HTMLInputElement | null;
   const focusKey = focus?.dataset?.filter !== undefined ? 'filter' : null;
   let main = '';
-  if (r === '/app') main = homeView();
+  const full = r === '/app' || r === '/how' || r === '/docs';
+  if (r === '/app') main = deskHTML();
+  else if (r === '/how' || r === '/docs') main = docsHTML(r);
+  else if (r === '/files') main = filesView();
   else if (r === '/graph') main = '<section class="panel graph-wrap" id="graph"></section>';
   else if (r.startsWith('/d/')) {
     const ca = normalizeAddress(r.slice(3));
@@ -384,11 +371,15 @@ async function render() {
     shared ??= await unpack(r.slice(3));
     main = shared ? sharedView(shared) : '<section class="card"><h2>Broken link</h2><p class="muted">This published dossier could not be read.</p></section>';
   }
-  if (r === '/app' && fresh === null) loadFresh();
+  unmountDesk?.();
+  unmountDesk = null;
   const y = scrollY;
   const graphIntro = r === '/graph' && once('graph') !== '';
-  app.innerHTML = shell(main);
+  app.innerHTML = shell(main, full);
   scrollTo(0, y);
+  if (r === '/app') unmountDesk = mountDesk(app);
+  if (r === '/how' || r === '/docs') mountDocs(app);
+  if (r.startsWith('/d/')) { const d = burrow.get(burrow.idFor(r.slice(3))); mountDossierLive(app, d && !d.demo ? latest(d) : undefined); }
   justAdded = '';
   statusSlide = null;
   if (r === '/graph') renderGraph(document.getElementById('graph')!, burrow.all(), graphIntro);
@@ -506,7 +497,7 @@ app.addEventListener('click', async (e) => {
     case 'delete':
       if (!confirm(`Delete the $${d.symbol || d.ca} dossier? This cannot be undone.`)) return;
       burrow.remove(d.id);
-      location.hash = '#/app';
+      location.hash = '#/files';
       return;
     default: return;
   }
@@ -522,7 +513,8 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
+mountChrome(document.getElementById('chrome')!, dig);
 startBlockTicker();
 render();
-setInterval(() => route() === '/app' && loadFresh(), 20_000);
-document.addEventListener('visibilitychange', () => !document.hidden && route() === '/app' && loadFresh());
+addEventListener('resize', () => syncChrome(route()));
+document.fonts?.ready.then(() => syncChrome(route()));
