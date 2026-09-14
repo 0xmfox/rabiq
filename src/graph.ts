@@ -9,7 +9,7 @@ const STATUS_LABEL: Record<Dossier['status'], string> = { watching: 'Watching', 
 
 type Edge = { a: string; b: string; confirmed: boolean; label: string; title: string };
 
-export function renderGraph(host: HTMLElement, list: Dossier[]) {
+export function renderGraph(host: HTMLElement, list: Dossier[], intro = false) {
   // one string per pair: solid if anything is confirmed, label shows the strongest reason
   const pairs = new Map<string, Edge & { labels: string[] }>();
   for (const l of findLinks(list)) {
@@ -34,13 +34,14 @@ export function renderGraph(host: HTMLElement, list: Dossier[]) {
     return;
   }
 
-  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-    <g class="edges">${links.map((l, i) => `<line class="edge ${l.confirmed ? '' : 'h'}" data-e="${i}"><title>${esc(l.title)}</title></line><text class="edge-label" data-el="${i}" text-anchor="middle">${esc(l.label)}</text>`).join('')}</g>
-    <g class="nodes">${list.map((d) => `<g class="node" data-id="${d.id}">
+  // nodes carry their position in the transform attribute, so the entrance animates an inner group
+  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" class="${intro ? 'play' : ''}">
+    <g class="edges">${links.map((l, i) => `<line class="edge ${l.confirmed ? '' : 'h'}" data-e="${i}" ${l.confirmed ? 'pathLength="1"' : ''} style="--i:${i}"><title>${esc(l.title)}</title></line><text class="edge-label" data-el="${i}" text-anchor="middle" style="--i:${i}">${esc(l.label)}</text>`).join('')}</g>
+    <g class="nodes">${list.map((d, i) => `<g class="node st-${d.status}" data-id="${d.id}"><g class="node-body" style="--i:${i}">
       <rect x="-64" y="-25" width="128" height="50" rx="9" fill="#151c12" stroke="rgba(232,240,222,.16)"/>
       <circle cx="-46" cy="0" r="4" fill="${COLOR[d.status]}"/>
       <text x="-34" y="-3">${esc(d.symbol || 'Unknown')}</text>
-      <text class="sub" x="-34" y="13">${STATUS_LABEL[d.status]}</text></g>`).join('')}</g>
+      <text class="sub" x="-34" y="13">${STATUS_LABEL[d.status]}</text></g></g>`).join('')}</g>
   </svg>
   <div class="legend"><span><i></i>Confirmed: shared deployer, fee recipient or repository</span><span><i class="h"></i>Hypothesis: mentioned in your notes</span><span>Drag to arrange, click to open</span></div>`;
 

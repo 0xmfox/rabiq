@@ -21,6 +21,7 @@
 </p>
 
 <p align="center">
+  <a href="https://rabiq.vercel.app"><strong>Live app</strong></a> ·
   <a href="#sixty-seconds">Sixty seconds</a> ·
   <a href="#the-dossier">The dossier</a> ·
   <a href="#deployer-memory">Deployer memory</a> ·

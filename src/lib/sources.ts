@@ -80,7 +80,7 @@ export async function readRepo(repo: string): Promise<RepoFacts | null> {
 const symbolAbi = parseAbi(['function symbol() view returns (string)']);
 
 
-async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
+export async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
   if (!tokens.length) return [];
   const res = await retry(() => client.multicall({ multicallAddress: MULTICALL3, allowFailure: true, contracts: tokens.map((address) => ({ address, abi: symbolAbi, functionName: 'symbol' as const })) }))
     .catch(() => tokens.map(() => ({ status: 'failure' as const, result: undefined })));
@@ -91,17 +91,23 @@ async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
 const PONS_V2_FIRST_BLOCK = 27_000_000n;
 const CHUNK = 12_000_000n;
 
+/** Every Pons V2 token this deployer launched, oldest first. Throws when the RPC refuses (it caps a response at 10k logs). */
+export async function launchTokens(deployer: string, headBlock?: number): Promise<`0x${string}`[]> {
+  const head = headBlock ? BigInt(headBlock) : await retry(() => client.getBlockNumber());
+  const ranges: [bigint, bigint][] = [];
+  for (let from = PONS_V2_FIRST_BLOCK; from <= head; from += CHUNK) ranges.push([from, from + CHUNK - 1n > head ? head : from + CHUNK - 1n]);
+  // sequential, bounded ranges: the public RPC rate-limits bursts and drops very wide scans
+  const tokens: `0x${string}`[] = [];
+  for (const [fromBlock, toBlock] of ranges)
+    for (const l of await retry(() => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock, toBlock })))
+      tokens.push(l.args.token!);
+  return tokens;
+}
+
 export async function readLaunches(deployer: string, headBlock?: number): Promise<Launch[] | null> {
   try {
-    const head = headBlock ? BigInt(headBlock) : await retry(() => client.getBlockNumber());
-    const ranges: [bigint, bigint][] = [];
-    for (let from = PONS_V2_FIRST_BLOCK; from <= head; from += CHUNK) ranges.push([from, from + CHUNK - 1n > head ? head : from + CHUNK - 1n]);
-    // sequential, bounded ranges: the public RPC rate-limits bursts and drops very wide scans
-    const logs = [];
-    for (const [fromBlock, toBlock] of ranges)
-      logs.push(...(await retry(() => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock, toBlock }))));
-    // ponytail: one symbol() call per launch; cap protects serial launchers (RPC also caps logs at 10k)
-    return await withSymbols(logs.map((l) => l.args.token!).slice(-40));
+    // ponytail: one symbol() call per launch; cap protects serial launchers
+    return await withSymbols((await launchTokens(deployer, headBlock)).slice(-40));
   } catch {
     return null;
   }
@@ -180,3 +186,6 @@ export function usd(n: number | null | undefined): string {
 }
 
 export const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+/** "$PEPE" and "PEPE" both render as "$PEPE". */
+export const ticker = (symbol: string) => `$${symbol.replace(/^\$+/, "")}`;

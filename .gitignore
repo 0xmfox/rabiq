@@ -5,3 +5,5 @@ brand/out
 burrow
 dist
 node_modules
+.vercel
+.cache

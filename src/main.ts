@@ -6,8 +6,10 @@ import { demoBurrow } from './lib/demo.ts';
 import { findLinks, linksOf, type Link } from './lib/links.ts';
 import { esc, md } from './lib/md.ts';
 import { adopt, pack, publish, unpack, type Published } from './lib/share.ts';
-import { diffSnapshots, readFreshLaunches, short, takeSnapshot, usd, type Launch } from './lib/sources.ts';
+import { diffSnapshots, readFreshLaunches, short, takeSnapshot, ticker, usd, type Launch } from './lib/sources.ts';
 import { renderGraph } from './graph.ts';
+import { landingHTML, mountLanding } from './landing.ts';
+import { blockText, seedBlock, startBlockTicker } from './lib/live.ts';
 
 export const REPO_URL = 'https://github.com/0xmfox/rabiq';
 export const X_URL = 'https://x.com/0xMfox';
@@ -18,6 +20,15 @@ let fresh: Launch[] | null = null;
 let filter = '';
 let notesEdit = false;
 let shared: Published | null = null;
+let unmountLanding: (() => void) | null = null;
+let freshNew = new Set<string>();
+let statusSlide: { id: string; from: number } | null = null;
+let justAdded = '';
+
+// render() rebuilds the page on every keystroke, so entrance animations are keyed to events
+// (a route opened, a snapshot arrived, a status changed) and play once per key until the route changes.
+const played = new Set<string>();
+const once = (key: string) => (played.has(key) ? '' : (played.add(key), ' play'));
 
 // ---------- helpers ----------
 const statusLabel = (s: Dossier['status']) => STATUSES.find((x) => x.id === s)!.label;
@@ -62,6 +73,7 @@ async function refresh(d: Dossier, force = false) {
   render();
   try {
     const snap = await takeSnapshot(d.ca, d.sources);
+    if (snap.chain) seedBlock(snap.chain.block);
     const cur = burrow.get(d.id) ?? d;
     if (!snap.chain && !snap.market) failed.add(d.id);
     const prev = latest(cur);
@@ -77,6 +89,30 @@ async function refresh(d: Dossier, force = false) {
   } finally {
     loading.delete(d.id);
     render();
+  }
+}
+
+let freshLoading = false;
+async function loadFresh() {
+  // background tabs skip the periodic refresh, but the first read always runs
+  if (freshLoading || (document.hidden && fresh !== null)) return;
+  freshLoading = true;
+  try {
+    const next = await readFreshLaunches(8);
+    const seen = new Set(fresh?.map((l) => l.token));
+    const changed = !fresh || next.map((l) => l.token).join() !== fresh.map((l) => l.token).join();
+    freshNew = fresh ? new Set(next.filter((l) => !seen.has(l.token)).map((l) => l.token)) : new Set();
+    fresh = next;
+    if (!changed || route() !== '/app') return;
+    // a re-render would wipe an address the visitor is typing; the next render picks the rows up
+    const active = document.activeElement as HTMLInputElement | null;
+    if (active?.name === 'ca' && active.value) return;
+    render();
+    setTimeout(() => freshNew.clear(), 1500);
+  } catch {
+    if (fresh === null) { fresh = []; if (route() === '/app') render(); }
+  } finally {
+    freshLoading = false;
   }
 }
 
@@ -105,8 +141,9 @@ function shell(main: string) {
   return `
   <header class="top"><div class="row">
     <a class="brand" href="#/"><img src="rabiq-256.png" alt=""><span>RABIQ</span></a>
-    <form class="dig" data-form="dig"><input class="field" name="ca" placeholder="Paste a Robinhood Chain contract address" autocomplete="off" spellcheck="false"><button class="btn primary">Open</button></form>
-    <nav><a href="#/" class="${r === '/' || r.startsWith('/d/') ? 'on' : ''}">Dossiers</a><a href="#/graph" class="${r === '/graph' ? 'on' : ''}">Graph</a><a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a><a href="${X_URL}" target="_blank" rel="noopener">X</a></nav>
+    <form class="dig" data-form="dig"><span class="dig-prefix">CA</span><input class="field" name="ca" placeholder="Paste a Robinhood Chain contract address" autocomplete="off" spellcheck="false"><button class="btn primary sm">Open file</button></form>
+    <nav><a href="#/app" class="${r === '/app' || r.startsWith('/d/') ? 'on' : ''}">Dossiers</a><a href="#/graph" class="${r === '/graph' ? 'on' : ''}">Graph</a><a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a><a href="${X_URL}" target="_blank" rel="noopener">X</a></nav>
+    <span class="block-live" title="Robinhood Chain block height"><i></i><b data-block>${blockText()}</b></span>
   </div></header>
   <div class="layout">
     <aside class="side">
@@ -117,42 +154,36 @@ function shell(main: string) {
           <span class="dot st-${d.status}"></span>
           <span class="sym">${esc(d.symbol || 'Unknown')}</span>
           <span class="ca">${short(d.ca)}${d.demo ? ' · demo' : ''}</span>
-        </a>`).join('') || '<div class="empty-line">No dossiers yet.</div>'}</div>
+        </a>`).join('') || (all.length ? '<div class="empty-line">Nothing matches.</div>' : '<div class="side-empty"><img src="rabiq-cut.png" alt=""><p>No dossiers yet. Paste a contract above or open one from the live wire.</p></div>')}</div>
       <div class="side-actions">
         <button class="btn ghost sm" data-act="demo">Load demo</button>
         <button class="btn ghost sm" data-act="export-all">Export</button>
         <label class="btn ghost sm">Import<input type="file" accept="application/json" data-import hidden></label>
       </div>
     </aside>
-    <main>${main}</main>
+    <main class="page${once('page')}">${main}</main>
   </div>`;
 }
 
 function homeView() {
   const rows = fresh === null
-    ? '<tr><td colspan="3"><span class="skeleton"></span></td></tr>'
+    ? Array.from({ length: 6 }, (_, i) => `<div class="wire-row" style="--i:${i}"><span class="wire-n">${String(i + 1).padStart(2, '0')}</span><span class="skeleton"></span></div>`).join('')
     : fresh.length
-      ? fresh.map((l) => `<tr><td class="sym">${esc(l.symbol)}</td><td class="mono muted">${l.token}</td><td class="right"><button class="btn ghost sm" data-act="dig" data-ca="${l.token}">Open</button></td></tr>`).join('')
-      : '<tr><td colspan="3" class="muted">No launches in the last few minutes.</td></tr>';
+      ? fresh.map((l, i) => `<button class="wire-row${freshNew.has(l.token) ? ' new' : ''}" data-act="dig" data-ca="${l.token}" style="--i:${i}">
+          <span class="wire-n">${String(i + 1).padStart(2, '0')}</span><span class="wire-sym">${esc(ticker(l.symbol))}</span><span class="wire-ca">${short(l.token)}</span><span class="wire-go">Open file</span></button>`).join('')
+      : '<div class="empty-line">No launches in the last few minutes.</div>';
   return `<div class="home">
-    <section class="intro">
-      <div>
-        <p class="eyebrow">Robinhood Chain · Pons V2</p>
-        <h1>Token dossiers with deployer memory.</h1>
-        <p class="lede">Paste a contract address to open a dossier. RABIQ reads the launch record, market and repository, keeps your notes next to them, and shows earlier dossiers from the same deployer.</p>
-        <div class="row-actions"><button class="btn primary" data-act="demo">Load demo dossiers</button><a class="btn" href="${REPO_URL}" target="_blank" rel="noopener">View source</a></div>
-      </div>
-      <img src="rabiq-640.png" alt="RABIQ mascot">
+    <section class="home-hero${once('home')}">
+      <p class="label"><span>File index</span>Pons V2 · Robinhood Chain</p>
+      <h1 class="display">Open a file<em>.</em></h1>
+      <p class="lede">Paste any contract address. RABIQ reads the launch record, the market and the repository, then lists every other token the same wallet launched.</p>
+      <form class="dig big" data-form="dig"><input class="field" name="ca" placeholder="0x… contract address" autocomplete="off" spellcheck="false"><button class="btn primary">Open file</button></form>
+      <div class="home-alt"><button class="link" data-act="demo">Load demo dossiers</button><a href="#/graph">Open the graph</a></div>
+      <img class="home-bunny" src="rabiq-cut.png" alt="" width="518" height="900">
     </section>
-    <section class="panel">
-      <div class="panel-head"><h2>Latest Pons V2 launches</h2><span class="live"><i></i>Live</span></div>
-      <table class="table"><thead><tr><th>Symbol</th><th>Contract</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    </section>
-    <section class="steps">
-      <div class="step"><span class="n">01</span><b>Open</b><span>Each contract address gets its own dossier with launch data, deployer, fee recipient, market and GitHub.</span></div>
-      <div class="step"><span class="n">02</span><b>Record</b><span>Write the thesis, arguments, checks and open questions, then set a decision.</span></div>
-      <div class="step"><span class="n">03</span><b>Return</b><span>Open the address again to see what changed and which dossiers share its deployer.</span></div>
-      <div class="step"><span class="n">04</span><b>Share</b><span>Publish a dossier as a link that anyone can save into their own list.</span></div>
+    <section class="wire${once(`wire:${fresh === null ? 'wait' : 'ready'}`)}">
+      <div class="wire-head"><span class="label"><span>Live wire</span>Newest Pons V2 launches</span><span class="block-live"><i></i>Block <b data-block>${blockText()}</b></span></div>
+      <div class="wire-list">${rows}</div>
     </section>
   </div>`;
 }
@@ -167,12 +198,12 @@ function factsCard(d: Dossier, all: Dossier[]) {
   const launches = s?.launches
     ? `<div class="launches">${s.launches.map((l) => {
         const k = known.get(l.token);
-        return `<a class="${l.token === d.ca ? 'self' : k ? 'known' : ''}" href="#/d/${l.token}" title="${l.token}">$${esc(l.symbol)}</a>`;
+        return `<a class="${l.token === d.ca ? 'self' : k ? 'known' : ''}" href="#/d/${l.token}" title="${l.token}">${esc(ticker(l.symbol))}</a>`;
       }).join('')}</div>`
     : '—';
   return `<section class="card"><h2>On-chain facts <span class="aside">${busy ? 'Reading chain…' : s ? `Checked ${ago(s.at)}${c ? ` · block ${c.block.toLocaleString()}` : ''}` : 'Not checked yet'}</span></h2>
     ${failed.has(d.id) ? '<p class="red">Could not read this address from Robinhood Chain or DexScreener. Check the CA.</p>' : ''}
-    <dl class="facts">
+    <dl class="facts${s && !busy ? once(`facts:${d.id}:${s.at}`) : ''}">
       <dt>Launchpad</dt><dd>${v(c?.launchpad === 'pons-v2' ? 'Pons V2' : c ? 'Not a Pons V2 launch' : '—')}</dd>
       <dt>Phase</dt><dd>${v(c?.phase === 'graduated' ? 'Graduated · Uniswap v4 pool' : c?.phase === 'curve' ? 'Bonding curve' : '—')}</dd>
       <dt>Deployer</dt><dd>${v(addrLink(c?.deployer))}</dd>
@@ -187,7 +218,7 @@ function factsCard(d: Dossier, all: Dossier[]) {
 
 function listBlock(d: Dossier, key: 'pros' | 'cons' | 'checked', placeholder: string, readonly: boolean) {
   const xs = d[key];
-  return `<ul class="items ${key}">${xs.map((x, i) => `<li><span>${esc(x)}</span>${readonly ? '' : `<button class="x" data-act="del-item" data-list="${key}" data-i="${i}" title="Remove">✕</button>`}</li>`).join('') || `<li class="empty-line">None yet</li>`}</ul>
+  return `<ul class="items ${key}">${xs.map((x, i) => `<li class="${justAdded === `${key}:${x}` ? 'add' : ''}"><span>${esc(x)}</span>${readonly ? '' : `<button class="x" data-act="del-item" data-list="${key}" data-i="${i}" title="Remove">✕</button>`}</li>`).join('') || `<li class="empty-line">None yet</li>`}</ul>
     ${readonly ? '' : `<form class="adder" data-form="add" data-list="${key}"><input class="field" name="text" placeholder="${placeholder}" autocomplete="off"><button class="btn sm">Add</button></form>`}`;
 }
 
@@ -206,47 +237,50 @@ function dossierView(d: Dossier, opts: { readonly?: boolean; publishedLinks?: Pu
 
   const memoryHits = ro ? [] : mine.filter((l) => l.confirmed).map((l) => ({ l, o: all.find((x) => x.id === l.other)! })).filter((h) => h.o);
   const memory = memoryHits.length
-    ? `<section class="memory"><h3>RABIQ remembers</h3><p class="sub">You already have ${memoryHits.length} dossier${memoryHits.length === 1 ? '' : 's'} connected to this deployer.</p>${memoryHits.map(({ l, o }) => {
+    ? `<section class="memory${once(`memory:${d.id}:${memoryHits.length}`)}"><h3>RABIQ remembers</h3><p class="sub">You already have ${memoryHits.length} dossier${memoryHits.length === 1 ? '' : 's'} connected to this deployer.</p>${memoryHits.map(({ l, o }) => {
         const q = o.questions.find((x) => !x.done);
-        return `<div class="hit"><a href="#/d/${o.ca}">$${esc(o.symbol)}</a><span>${esc(l.label)} <span class="sep">/</span> <span class="st-${o.status} stx">${statusLabel(o.status)}</span>${o.reason ? ` <span class="muted">${esc(o.reason)}</span>` : ''}</span>
+        return `<div class="hit"><a href="#/d/${o.ca}">${esc(ticker(o.symbol))}</a><span>${esc(l.label)} <span class="sep">/</span> <span class="st-${o.status} stx">${statusLabel(o.status)}</span>${o.reason ? ` <span class="muted">${esc(o.reason)}</span>` : ''}</span>
           <span></span><span class="muted">${esc(o.thesis.slice(0, 180) || 'No thesis written.')}</span>${q ? `<span></span><span class="q">${esc(q.text)}</span>` : ''}</div>`;
       }).join('')}</section>`
     : '';
 
   const since = s && prev && changes.length
-    ? `<section class="since"><h3>Since your last check <span class="muted">${ago(prev.at)}</span></h3>${changes.length ? `<ul>${changes.map((c) => `<li class="${c.tone}">${c.href ? `<a href="${c.href}" target="_blank" rel="noopener noreferrer">${esc(c.text)}</a>` : esc(c.text)}</li>`).join('')}</ul>` : '<span class="muted">No changes.</span>'}</section>`
+    ? `<section class="since${once(`since:${d.id}:${s.at}`)}"><h3>Since your last check <span class="muted">${ago(prev.at)}</span></h3>${changes.length ? `<ul>${changes.map((c) => `<li class="${c.tone}">${c.href ? `<a href="${c.href}" target="_blank" rel="noopener noreferrer">${esc(c.text)}</a>` : esc(c.text)}</li>`).join('')}</ul>` : '<span class="muted">No changes.</span>'}</section>`
     : '';
 
   const connections = opts.publishedLinks
-    ? opts.publishedLinks.map((l) => `<a class="conn" href="#/d/${l.ca}"><span class="kind ${l.confirmed ? 'c' : 'h'}">${l.confirmed ? 'Confirmed' : 'Hypothesis'}</span><span class="sym">$${esc(l.symbol)}</span><span class="via">${esc(l.label)}</span></a>`).join('')
+    ? opts.publishedLinks.map((l) => `<a class="conn" href="#/d/${l.ca}"><span class="kind ${l.confirmed ? 'c' : 'h'}">${l.confirmed ? 'Confirmed' : 'Hypothesis'}</span><span class="sym">${esc(ticker(l.symbol))}</span><span class="via">${esc(l.label)}</span></a>`).join('')
     : mine.filter((l) => l.confirmed || !mine.some((x) => x.confirmed && x.other === l.other)).map((l) => {
         const o = all.find((x) => x.id === l.other)!;
-        return `<a class="conn" href="#/d/${o.ca}"><span class="kind ${l.confirmed ? 'c' : 'h'}">${l.confirmed ? 'Confirmed' : 'Hypothesis'}</span><span class="sym">$${esc(o.symbol || '???')}</span><span class="via">${esc(l.label)}${l.via ? ` · ${esc(short(l.via))}` : ''}</span></a>`;
+        return `<a class="conn" href="#/d/${o.ca}"><span class="kind ${l.confirmed ? 'c' : 'h'}">${l.confirmed ? 'Confirmed' : 'Hypothesis'}</span><span class="sym">${esc(ticker(o.symbol || '???'))}</span><span class="via">${esc(l.label)}${l.via ? ` · ${esc(short(l.via))}` : ''}</span></a>`;
       }).join('');
 
   return `<div class="dossier">
     ${d.demo ? '<div class="demo-flag">Demo dossier. Addresses, numbers and repositories are invented.</div>' : ''}
-    <section class="dhead">
-      <div>
-        <h1>${esc(d.symbol || 'Unknown')}</h1>
-        ${d.name && d.name !== d.symbol ? `<div class="name">${esc(d.name)}</div>` : ''}
+    <section class="dhead${once(`dhead:${d.id}`)}">
+      <div class="dhead-main">
+        <p class="label"><span>File <b>${short(d.ca)}</b></span>${d.name && d.name !== d.symbol ? esc(d.name) : 'Robinhood Chain'}</p>
+        <h1 class="display">${esc(d.symbol || 'Unknown')}</h1>
         <div class="ca"><code>${d.ca}</code><button class="copy" data-act="copy" data-text="${d.ca}">Copy</button>
-          <a href="${EXPLORER}/token/${d.ca}" target="_blank" rel="noopener noreferrer">Blockscout</a>
-          <a href="https://dexscreener.com/robinhood/${d.ca}" target="_blank" rel="noopener noreferrer">DexScreener</a></div>
-        ${ro ? '' : `<div class="meta"><span class="st-${d.status} stx">${statusLabel(d.status)}</span><span>Opened ${ago(d.createdAt)}</span>${s ? `<span>Checked ${ago(s.at)}</span>` : ''}${d.origin ? `<span>Saved from @${esc(d.origin.author || 'anon')}</span>` : ''}</div>`}
+          <a href="${EXPLORER}/token/${d.ca}" target="_blank" rel="noopener noreferrer">Blockscout ↗</a>
+          <a href="https://dexscreener.com/robinhood/${d.ca}" target="_blank" rel="noopener noreferrer">DexScreener ↗</a></div>
+        ${ro ? '' : `<div class="meta"><span>Opened ${ago(d.createdAt)}</span>${s ? `<span>Checked ${ago(s.at)}</span>` : ''}${d.origin ? `<span>Saved from @${esc(d.origin.author || 'anon')}</span>` : ''}</div>`}
       </div>
-      ${ro ? '' : `<div class="actions">
-        <button class="btn sm" data-act="refresh" ${d.demo ? 'disabled' : ''}>${loading.has(d.id) ? 'Reading…' : 'Refresh'}</button>
-        <button class="btn sm primary" data-act="publish">Publish</button>
-        <button class="btn sm" data-act="export">Export .md</button>
-        <button class="btn sm ghost danger" data-act="delete">Delete</button>
+      ${ro ? '' : `<div class="dhead-side">
+        <div class="verdict st-${d.status}${once(`verdict:${d.id}:${d.status}`)}" title="Your decision">${statusLabel(d.status)}</div>
+        <div class="actions">
+          <button class="btn sm${loading.has(d.id) ? ' busy' : ''}" data-act="refresh" ${d.demo ? 'disabled' : ''}>${loading.has(d.id) ? '<i class="spin"></i>Reading chain' : 'Refresh'}</button>
+          <button class="btn sm primary" data-act="publish">Publish</button>
+          <button class="btn sm" data-act="export">Export .md</button>
+          <button class="btn sm ghost danger" data-act="delete">Delete</button>
+        </div>
       </div>`}
     </section>
     ${memory}${since}
     <div class="grid">
       <div class="col">
         ${ro ? '' : `<section class="card"><h2>Decision</h2>
-          <div class="statuses">${STATUSES.map((st) => `<button class="st-${st.id} ${d.status === st.id ? 'on' : ''}" data-act="status" data-status="${st.id}">${st.label}</button>`).join('')}</div>
+          <div class="statuses${statusSlide?.id === d.id ? ' slide' : ''}" style="--idx:${STATUSES.findIndex((st) => st.id === d.status)};--from:${statusSlide?.id === d.id ? statusSlide.from : 0}">${STATUSES.map((st) => `<button class="st-${st.id} ${d.status === st.id ? 'on' : ''}" data-act="status" data-status="${st.id}">${st.label}</button>`).join('')}</div>
           <input class="field" data-field="reason" placeholder="Reason (private)" value="${esc(d.reason)}"></section>`}
         <section class="card"><h2>Thesis</h2>${ro ? `<div class="notes-view">${md(d.thesis || '—', resolve)}</div>` : `<textarea class="field" data-field="thesis" placeholder="What is this project and how do you know?">${esc(d.thesis)}</textarea>`}</section>
         <section class="card two">
@@ -254,7 +288,7 @@ function dossierView(d: Dossier, opts: { readonly?: boolean; publishedLinks?: Pu
           <div><h2>Against</h2>${listBlock(d, 'cons', 'Add an argument against', ro)}</div>
         </section>
         <section class="card"><h2>Open questions</h2>
-          <ul class="items">${d.questions.map((q, i) => `<li class="${q.done ? 'done' : ''} ${i === firstOpen ? 'pick' : ''}"><input type="checkbox" ${q.done ? 'checked' : ''} ${ro ? 'disabled' : ''} data-act="q-toggle" data-i="${i}"><span>${esc(q.text)}</span>${ro ? '' : `<button class="x" data-act="del-q" data-i="${i}">✕</button>`}</li>`).join('') || '<li class="empty-line">No open questions.</li>'}</ul>
+          <ul class="items">${d.questions.map((q, i) => `<li class="${q.done ? 'done' : ''} ${i === firstOpen ? 'pick' : ''} ${justAdded === `q:${q.text}` ? 'add' : ''}"><input type="checkbox" ${q.done ? 'checked' : ''} ${ro ? 'disabled' : ''} data-act="q-toggle" data-i="${i}"><span>${esc(q.text)}</span>${ro ? '' : `<button class="x" data-act="del-q" data-i="${i}">✕</button>`}</li>`).join('') || '<li class="empty-line">No open questions.</li>'}</ul>
           ${ro ? '' : '<form class="adder" data-form="add-q"><input class="field" name="text" placeholder="Add a question" autocomplete="off"><button class="btn sm">Add</button></form>'}
         </section>
         <section class="card"><h2>Checked</h2>${listBlock(d, 'checked', 'Add something you verified', ro)}</section>
@@ -277,11 +311,11 @@ function dossierView(d: Dossier, opts: { readonly?: boolean; publishedLinks?: Pu
 }
 
 function sharedView(p: Published) {
-  // read-only preview of the author's dossier as they wrote it; attribution is added only on save
+  // preview of the author's dossier as they wrote it; attribution is added only on save
   const temp = { ...adopt(p, undefined), checked: p.checked, origin: undefined };
   const mineAlready = burrow.get(temp.id);
   return `<div class="dossier">
-    <section class="shared"><div class="grow"><h3>Published dossier${p.author ? ` by @${esc(p.author)}` : ''}</h3><span class="muted">${p.at ? new Date(p.at).toLocaleString() : ''} · Status and private notes are not included unless the author added them</span></div>
+    <section class="shared${once('shared')}"><span class="verdict published">Published</span><div class="grow"><h3>Published dossier${p.author ? ` by @${esc(p.author)}` : ''}</h3><span class="muted">${p.at ? new Date(p.at).toLocaleString() : ''} · Status and private notes are not included unless the author added them</span></div>
       <button class="btn primary" data-act="adopt">${mineAlready ? 'Merge into my dossier' : 'Save to my brain'}</button></section>
     ${dossierView(temp, { readonly: true, publishedLinks: p.links })}
   </div>`;
@@ -325,10 +359,17 @@ function publishDialog(d: Dossier) {
 // ---------- render ----------
 async function render() {
   const r = route();
+  if (r === '/') {
+    // the landing runs its own live reads; re-rendering it would restart them
+    if (!unmountLanding) { app.innerHTML = landingHTML(); unmountLanding = mountLanding(app); }
+    return;
+  }
+  unmountLanding?.();
+  unmountLanding = null;
   const focus = document.activeElement as HTMLInputElement | null;
   const focusKey = focus?.dataset?.filter !== undefined ? 'filter' : null;
   let main = '';
-  if (r === '/') main = homeView();
+  if (r === '/app') main = homeView();
   else if (r === '/graph') main = '<section class="panel graph-wrap" id="graph"></section>';
   else if (r.startsWith('/d/')) {
     const ca = normalizeAddress(r.slice(3));
@@ -343,10 +384,14 @@ async function render() {
     shared ??= await unpack(r.slice(3));
     main = shared ? sharedView(shared) : '<section class="card"><h2>Broken link</h2><p class="muted">This published dossier could not be read.</p></section>';
   }
+  if (r === '/app' && fresh === null) loadFresh();
   const y = scrollY;
+  const graphIntro = r === '/graph' && once('graph') !== '';
   app.innerHTML = shell(main);
   scrollTo(0, y);
-  if (r === '/graph') renderGraph(document.getElementById('graph')!, burrow.all());
+  justAdded = '';
+  statusSlide = null;
+  if (r === '/graph') renderGraph(document.getElementById('graph')!, burrow.all(), graphIntro);
   if (focusKey === 'filter') {
     const el = app.querySelector<HTMLInputElement>('[data-filter]')!;
     el.focus();
@@ -367,12 +412,13 @@ app.addEventListener('submit', (e) => {
   if (form.dataset.form === 'dig') return dig(text);
   const d = currentDossier();
   if (!d || !text) return;
-  if (form.dataset.form === 'add-q') d.questions.push({ text, done: false });
+  if (form.dataset.form === 'add-q') { d.questions.push({ text, done: false }); justAdded = `q:${text}`; }
   if (form.dataset.form === 'add') {
     const key = form.dataset.list as 'pros' | 'cons' | 'checked' | 'sources';
     if (key === 'sources' && !/^https?:\/\//i.test(text)) return toast('Sources must be http(s) links');
     if (d[key].includes(text)) return;
     d[key].push(text);
+    justAdded = `${key}:${text}`;
     burrow.put(d);
     if (key === 'sources' && /github\.com/i.test(text)) return void refresh(d, true);
   }
@@ -422,7 +468,11 @@ app.addEventListener('click', async (e) => {
       return;
     }
     case 'export-all': return download('rabiq-burrow.json', JSON.stringify(burrow.all(), null, 2), 'application/json');
-    case 'copy': await navigator.clipboard.writeText(t.dataset.text!); return toast('Copied');
+    case 'copy':
+      await navigator.clipboard.writeText(t.dataset.text!);
+      t.textContent = 'Copied';
+      t.classList.add('done');
+      return void setTimeout(() => { t.textContent = 'Copy'; t.classList.remove('done'); }, 1400);
     case 'notes-mode': notesEdit = !notesEdit; return render();
     case 'adopt': {
       if (!shared) return;
@@ -438,6 +488,8 @@ app.addEventListener('click', async (e) => {
   switch (act) {
     case 'refresh': return refresh(d, true);
     case 'status':
+      if (d.status === t.dataset.status) return;
+      statusSlide = { id: d.id, from: STATUSES.findIndex((st) => st.id === d.status) };
       d.status = t.dataset.status as Dossier['status'];
       logEvent(d, `Status → ${statusLabel(d.status)}`);
       break;
@@ -454,7 +506,7 @@ app.addEventListener('click', async (e) => {
     case 'delete':
       if (!confirm(`Delete the $${d.symbol || d.ca} dossier? This cannot be undone.`)) return;
       burrow.remove(d.id);
-      location.hash = '#/';
+      location.hash = '#/app';
       return;
     default: return;
   }
@@ -465,9 +517,12 @@ app.addEventListener('click', async (e) => {
 window.addEventListener('hashchange', () => {
   if (!route().startsWith('/s/')) shared = null;
   notesEdit = false;
+  played.clear();
+  scrollTo(0, 0);
   render();
-  if (!route().startsWith('/d/')) scrollTo(0, 0);
 });
 
+startBlockTicker();
 render();
-readFreshLaunches(8).then((l) => { fresh = l; render(); }).catch(() => { fresh = []; render(); });
+setInterval(() => route() === '/app' && loadFresh(), 20_000);
+document.addEventListener('visibilitychange', () => !document.hidden && route() === '/app' && loadFresh());
