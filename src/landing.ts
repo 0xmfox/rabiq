@@ -161,13 +161,17 @@ function mountFile(root: HTMLElement, data: Promise<LandingData | null>, alive: 
 
   async function history(chain: ChainFacts, token: string, stale: () => boolean) {
     let tokens: `0x${string}`[] | null = null;
-    try { tokens = await launchTokens(chain.deployer!, chain.block); } catch { /* RPC refuses very large histories */ }
+    // the public RPC throttles bursts; one spaced retry covers most of it
+    for (let i = 0; i < 2 && !tokens && !stale(); i++) {
+      try { tokens = await launchTokens(chain.deployer!, chain.block); } catch { await new Promise((r) => setTimeout(r, 2500)); }
+    }
     if (stale()) return;
-    const known = (await data)?.tracks.find((t) => t.deployer === chain.deployer);
     if (!tokens) {
-      f('count').textContent = known ? `${fmt(known.launches)} launches` : 'Too many to read live';
+      const known = (await data)?.tracks.find((t) => t.deployer === chain.deployer);
+      f('count').textContent = known ? `${fmt(known.launches)} launches` : 'Chain busy, open the full dossier';
       rowEl('history').classList.add('in');
-      return stamp(known ? 'Serial launcher' : 'Heavy history', known ? `${fmt(known.launches)} launches` : '10,000+ launches', 'warn');
+      if (known) stamp('Serial launcher', `${fmt(known.launches)} launches`, 'warn');
+      return;
     }
     const idx = tokens.findIndex((t) => t.toLowerCase() === token.toLowerCase());
     const earlier = Math.max(0, idx);

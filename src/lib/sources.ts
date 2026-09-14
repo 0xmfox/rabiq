@@ -91,7 +91,7 @@ export async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
 const PONS_V2_FIRST_BLOCK = 27_000_000n;
 const CHUNK = 12_000_000n;
 
-/** Every Pons V2 token this deployer launched, oldest first. Throws when the RPC refuses (it caps a response at 10k logs). */
+/** Every Pons V2 token this deployer launched, oldest first. Throws when the public RPC keeps throttling. */
 export async function launchTokens(deployer: string, headBlock?: number): Promise<`0x${string}`[]> {
   const head = headBlock ? BigInt(headBlock) : await retry(() => client.getBlockNumber());
   const ranges: [bigint, bigint][] = [];

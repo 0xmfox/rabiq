@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/banner.png" width="100%" alt="RABIQ banner: every CA is a rabbit hole. RABIQ remembers what you found." />
+  <a href="https://rabiq.vercel.app"><img src="assets/social-preview.png" width="100%" alt="RABIQ: every deployer has a history. A live case file for $ESSAY stamped 1 earlier launch from this deployer." /></a>
 </p>
 
 <p align="center">
@@ -16,12 +16,13 @@
 </p>
 
 <p align="center">
-  <strong>Every CA is a rabbit hole. RABIQ remembers what you found.</strong><br/>
-  Token dossiers and deployer memory for the Robinhood trenches.
+  <strong>Every deployer has a history.</strong><br/>
+  Token dossiers and deployer memory for Robinhood Chain.
 </p>
 
 <p align="center">
   <a href="https://rabiq.vercel.app"><strong>Live app</strong></a> ·
+  <a href="#the-number">The number</a> ·
   <a href="#sixty-seconds">Sixty seconds</a> ·
   <a href="#the-dossier">The dossier</a> ·
   <a href="#deployer-memory">Deployer memory</a> ·
@@ -37,6 +38,8 @@
 
 Pons V2 ships a new token on Robinhood Chain every few seconds. You look at a CA, open the repo, read the launch post and decide to wait. Two days later the same deployer launches again, and you have to find everything a second time.
 
+That happens a lot. Across 458,223 Pons V2 launches, **43.9%** of the launches made by wallets came from a wallet that had already launched a token before ([how we counted](#the-number)).
+
 RABIQ turns every contract address into a **dossier**: the on-chain facts, your thesis, what you checked, the question you stopped at and your decision. Open the CA again and RABIQ shows **what changed since your last check**. Dig a new CA from a deployer you already studied and RABIQ puts your old notes in front of you.
 
 ### Keep what you found
@@ -47,6 +50,8 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 
 | Engine | Status | What is in the repo |
 | --- | --- | --- |
+| Live site | **WORKING** | [rabiq.vercel.app](https://rabiq.vercel.app): a landing page that opens a case file on the newest Pons V2 launch, then the app |
+| Launch census | **WORKING** | `scripts/landing-data.ts` reads every `TokenLaunched` event, tells wallets from contracts by bytecode and counts repeat launchers |
 | Token dossier | **WORKING** | Paste a CA → one dossier per chain + address, so identical tickers never mix |
 | On-chain facts | **WORKING** | Pons V2 factory `getLaunchedToken` → deployer, fee recipient, phase, creator tax |
 | Deployer memory | **WORKING** | Every `TokenLaunched` by the same deployer; RABIQ highlights tokens already in your burrow |
@@ -55,28 +60,57 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 | Strings | **WORKING** | Dossiers link through a shared deployer, fee recipient or GitHub repo (**confirmed**) or through your own notes (**hypothesis**) |
 | Graph | **WORKING** | All dossiers as draggable nodes and connections |
 | Publish / Save to my brain | **WORKING** | A dossier is packed into the link itself. Status, reason and notes stay private unless you opt in |
-| Latest launches | **WORKING** | Live table of the newest Pons V2 launches on the home screen |
+| Live wire | **WORKING** | The newest Pons V2 launches on the app home, refreshed every 20 seconds, next to the live block height |
 | Markdown export | **WORKING** | Any dossier as an Obsidian-friendly note with frontmatter; all dossiers as JSON |
 | CLI | **WORKING** | `rabiq dig`, `rabiq recall`, `rabiq demo` over a folder of Markdown notes |
 | Demo dossiers | **WORKING** | Four synthetic dossiers, labelled as demo, no network requests |
 
 ## What it looks like
 
-<p align="center"><img src="assets/demo.gif" width="100%" alt="RABIQ walkthrough on live Robinhood Chain tokens: dossiers, memory, since last check, graph" /></p>
+<p align="center"><img src="assets/demo.gif" width="100%" alt="RABIQ walkthrough on Robinhood Chain mainnet: the live case file, the number, serial launchers, the live wire, a dossier and the graph" /></p>
 
-The HOP OUT dossier. Its deployer also launched ESSAY, so RABIQ puts the ESSAY research at the top.
+The landing page opens a case file on a Pons V2 token as you watch. Here it is ESSAY: RABIQ reads the launch record and the deployer's history, then stamps the file with what it found.
 
-![RABIQ dossier with memory and since-last-check panels](assets/screens/dossier.png)
+![RABIQ landing page with a live case file for ESSAY](assets/screens/landing.webp)
+
+The app starts with the live wire of new launches. Paste any contract address, or open one from the list.
+
+![RABIQ app home with the live wire of new Pons V2 launches](assets/screens/app.webp)
+
+The HOP OUT dossier. Its deployer also launched ESSAY, so RABIQ puts the ESSAY research at the top. The stamp on the right is your decision.
+
+![RABIQ dossier with the memory panel and on-chain facts](assets/screens/dossier.webp)
 
 | Dossiers as a graph | A published dossier, ready for “Save to my brain” |
 | --- | --- |
-| ![Graph of seven dossiers; HOP OUT and ESSAY share a deployer](assets/screens/graph.png) | ![Published YOINK dossier](assets/screens/shared.png) |
+| ![Graph of seven dossiers; HOP OUT and ESSAY share a deployer](assets/screens/graph.webp) | ![Published YOINK dossier](assets/screens/shared.webp) |
 
 <sub>Screenshots of the running app on Robinhood Chain mainnet. The tokens are live Pons V2 launches from other builders, used here as research examples. The notes in them are sample research, not recommendations.</sub>
 
+## The number
+
+<p align="center"><img src="assets/screens/number.webp" width="100%" alt="43.9% of Pons V2 launches from wallets came from a wallet that had already launched a token" /></p>
+
+`scripts/landing-data.ts` builds the numbers on the landing page from the chain itself:
+
+1. It reads every `TokenLaunched` event from the Pons V2 factory, from the first launch at block 27,027,321 to the current head: 458,223 launches by 252,891 deployer addresses as of block 62,899,527 (14 Sep 2026).
+2. It checks the bytecode of every deployer that launched more than once. A single `eth_call` places a small EXTCODESIZE loop at a scratch address with a state override and measures 1,500 addresses per request.
+3. Addresses without code count as wallets. So do EIP-7702 accounts, whose only code is the 23-byte delegation designator: a key still controls them. The rest are contracts, such as Multicall3, and their 8,206 launches stay out of the share.
+4. A launch counts as "launched before" when the wallet already had an earlier Pons V2 launch: 197,374 of 450,017 wallet launches, or 43.9%.
+
+Single-launch deployers skip the bytecode check. A contract among them would only add a first launch to the denominator, so the share can only come out lower than the true value.
+
+The same script picks the wallets for **Serial launchers**: the two busiest wallets as launch density over the life of Pons V2, and the four wallets with 6 to 60 launches that graduated the most tokens from the bonding curve.
+
+<p align="center"><img src="assets/screens/serial.webp" width="100%" alt="Launch timelines of six serial launchers on Pons V2; lime marks graduated tokens" /></p>
+
+```bash
+node scripts/landing-data.ts   # rewrites public/landing.json; raw logs are cached in .cache/
+```
+
 ## Sixty seconds
 
-1. **Dig.** Paste a Robinhood Chain CA into the top bar, or open a token from **Latest Pons V2 launches**. RABIQ reads the Pons V2 launch record, the market and every launch by the same deployer.
+1. **Dig.** Paste a Robinhood Chain CA into the top bar, or open a token from the **live wire**. RABIQ reads the Pons V2 launch record, the market and every launch by the same deployer.
 2. **Write down what you know.** A one-line thesis, two arguments for, one against. Add the launch post and the GitHub repo as sources; RABIQ records the repo head commit on the next check.
 3. **Leave a question.** “Does the CLI actually run?” RABIQ marks the first open question **next**.
 4. **Decide.** Watching, Researching, In position or Passed, with a reason.
@@ -88,7 +122,7 @@ The HOP OUT dossier. Its deployer also launched ESSAY, so RABIQ puts the ESSAY r
 
 One dossier per chain and contract address. Two tokens with the same ticker are two different dossiers.
 
-<p align="center"><img src="assets/screens/questions.png" width="80%" alt="Open questions with the next one flagged" /></p>
+<p align="center"><img src="assets/screens/questions.webp" width="80%" alt="Open questions with the next one flagged" /></p>
 
 | Section | What it holds |
 | --- | --- |
@@ -112,13 +146,13 @@ Two things happen with that list:
 - **In the facts panel**, RABIQ lists the deployer's launches. It highlights the ones you already have a dossier for and links them to your notes.
 - **In RABIQ remembers**, RABIQ surfaces any dossier that shares this deployer or fee recipient, with its decision, reason, thesis and first open question.
 
-<p align="center"><img src="assets/screens/memory.png" width="100%" alt="RABIQ remembers: the ESSAY dossier shown on HOP OUT through the shared deployer" /></p>
+<p align="center"><img src="assets/screens/memory.webp" width="100%" alt="RABIQ remembers: the ESSAY dossier shown on HOP OUT through the shared deployer" /></p>
 
 ## Since last check
 
 Every check stores a snapshot. RABIQ compares the newest snapshot with the previous one using fixed rules:
 
-<p align="center"><img src="assets/screens/since.png" width="100%" alt="YOINK: FDV and liquidity moved since the last check" /></p>
+<p align="center"><img src="assets/screens/since.webp" width="100%" alt="YOINK: FDV moved since the last check" /></p>
 
 | Change | Rule |
 | --- | --- |
@@ -144,7 +178,7 @@ A check that finds nothing new replaces the latest snapshot instead of adding on
 
 RABIQ confirms a string from identical addresses and repositories. It files anything drawn from your own writing as a hypothesis. The **Graph** view draws one string per pair: solid when a confirmed link exists, dashed for hypotheses.
 
-<p align="center"><img src="assets/screens/facts.png" width="55%" alt="On-chain facts and connections panels" /></p>
+<p align="center"><img src="assets/screens/facts.webp" width="55%" alt="On-chain facts and connections panels" /></p>
 
 ## Publish and Save to my brain
 
@@ -185,6 +219,7 @@ Click **Load demo dossiers** for an offline walkthrough, or paste any Robinhood 
 ```bash
 npm test           # logic tests
 npm run build      # static site in dist/, deployable anywhere
+node scripts/landing-data.ts   # refresh the launch census on the landing page
 ```
 
 ## CLI
@@ -295,7 +330,8 @@ No. RABIQ organises your research; you make the trading decisions.
 
 - [x] Web app: dossiers, deployer memory, since last check, strings, graph, publish
 - [x] CLI over Markdown notes
-- [ ] Hosted web app
+- [x] Hosted web app at [rabiq.vercel.app](https://rabiq.vercel.app)
+- [x] Landing page with a live case file and the on-chain launch census
 - [ ] Deployer watchlist: flag new launches from deployers already in your burrow
 - [ ] Publish a whole research map (several connected dossiers) as one link
 - [ ] Optional GitHub token for higher repository rate limits
@@ -317,15 +353,18 @@ src/lib/links.ts     confirmed vs hypothesis strings between dossiers
 src/lib/share.ts     publish links, sanitising, Save to my brain merge
 src/lib/burrow.ts    dossier model, localStorage, Markdown export
 src/lib/demo.ts      synthetic demo burrow
+src/lib/live.ts      live block height shared by every page
+src/landing.ts       landing page: live case file, the number, serial launchers
 src/main.ts          web app
 src/graph.ts         burrow graph
+scripts/landing-data.ts  launch census behind public/landing.json
 bin/rabiq.ts         CLI over Markdown notes
 test/                node:test suite
 ```
 
 ## Built on
 
-[viem](https://viem.sh) for Robinhood Chain reads · [Vite](https://vite.dev) for the web build · [Pons V2](https://www.ponsfamily.com) launch records · [DexScreener API](https://docs.dexscreener.com) · [GitHub REST API](https://docs.github.com/rest) · Multicall3
+[viem](https://viem.sh) for Robinhood Chain reads · [Vite](https://vite.dev) for the web build · [Pons V2](https://www.ponsfamily.com) launch records · [DexScreener API](https://docs.dexscreener.com) · [GitHub REST API](https://docs.github.com/rest) · Multicall3 · hosted on [Vercel](https://vercel.com)
 
 ## $RABIQ
 
