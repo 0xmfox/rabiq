@@ -1,0 +1,41 @@
+{
+  "name": "rabiq",
+  "version": "0.1.0",
+  "description": "A second brain for the Robinhood trenches.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "dev": "vite",
+    "build": "vite build --base ./",
+    "preview": "vite preview --base ./",
+    "rabiq": "node bin/rabiq.ts"
+  },
+  "keywords": [
+    "robinhood-chain",
+    "pons",
+    "onchain",
+    "research",
+    "cli"
+  ],
+  "type": "module",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "viem": "^2.56.5"
+  },
+  "license": "MIT",
+  "bin": {
+    "rabiq": "bin/rabiq.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xmfox/rabiq.git"
+  },
+  "homepage": "https://github.com/0xmfox/rabiq#readme",
+  "author": "0xMfox (https://x.com/0xMfox)"
+}
