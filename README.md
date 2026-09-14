@@ -69,14 +69,6 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 
 <p align="center"><img src="assets/demo.gif" width="100%" alt="RABIQ walkthrough on Robinhood Chain mainnet: the live case file, the number, serial launchers, the live wire, a dossier and the graph" /></p>
 
-The landing page opens a case file on a Pons V2 token as you watch. Here it is ESSAY: RABIQ reads the launch record and the deployer's history, then stamps the file with what it found.
-
-![RABIQ landing page with a live case file for ESSAY](assets/screens/landing.webp)
-
-The app starts with the live wire of new launches. Paste any contract address, or open one from the list.
-
-![RABIQ app home with the live wire of new Pons V2 launches](assets/screens/app.webp)
-
 The HOP OUT dossier. Its deployer also launched ESSAY, so RABIQ puts the ESSAY research at the top. The stamp on the right is your decision.
 
 ![RABIQ dossier with the memory panel and on-chain facts](assets/screens/dossier.webp)
