@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/avatar.png" width="120" alt="RABIQ: a skeptical pixel rabbit holding a dossier" />
+  <img src="assets/avatar-full.png" width="160" alt="RABIQ: a skeptical pixel rabbit holding a dossier" />
 </p>
 
 <p align="center">
@@ -99,6 +99,10 @@ The HOP OUT dossier. Its deployer also launched ESSAY, so RABIQ puts the ESSAY r
 4. A launch counts as "launched before" when the wallet already had an earlier Pons V2 launch: 197,374 of 450,017 wallet launches, or 43.9%.
 
 Single-launch deployers skip the bytecode check. A contract among them would only add a first launch to the denominator, so the share can only come out lower than the true value.
+
+All 458,223 launches, bucketed by block height:
+
+<p align="center"><img src="assets/screens/activity.svg" width="100%" alt="All 458,223 Pons V2 launches bucketed by block height, from block 27,027,321 to 62,899,527" /></p>
 
 The same script picks the wallets for **Serial launchers**: the two busiest wallets as launch density over the life of Pons V2, and the four wallets with 6 to 60 launches that graduated the most tokens from the bonding curve.
 
