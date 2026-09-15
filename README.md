@@ -24,6 +24,8 @@
   <a href="https://rabiq.vercel.app"><strong>Live app</strong></a> ·
   <a href="#the-number">The number</a> ·
   <a href="#sixty-seconds">Sixty seconds</a> ·
+  <a href="#live-desk">Live desk</a> ·
+  <a href="#token-analytics">Token analytics</a> ·
   <a href="#the-dossier">The dossier</a> ·
   <a href="#deployer-memory">Deployer memory</a> ·
   <a href="#quick-start">Quick start</a> ·
@@ -54,13 +56,15 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 | Launch census | **WORKING** | `scripts/landing-data.ts` reads every `TokenLaunched` event, tells wallets from contracts by bytecode and counts repeat launchers |
 | Token dossier | **WORKING** | Paste a CA → one dossier per chain + address, so identical tickers never mix |
 | On-chain facts | **WORKING** | Pons V2 factory `getLaunchedToken` → deployer, fee recipient, phase (curve, swept, graduated, rescued), creator tax; curve price and progress from `getReserves` |
-| Deployer memory | **WORKING** | Every `TokenLaunched` by the same deployer; RABIQ highlights tokens already in your burrow |
+| Deployer memory | **WORKING** | Every `TokenLaunched` by the same deployer across the whole Pons V2 history, in one indexed log query; RABIQ highlights tokens already in your burrow |
+| Deployer constellation | **WORKING** | The deployer's launches drawn around it on every dossier: this token, graduated tokens, other launches; drag to rearrange, click to open |
 | RABIQ remembers | **WORKING** | Opening a dossier surfaces connected dossiers with their thesis, decision and first open question |
 | Since last check | **WORKING** | FDV and liquidity moves, curve → pool graduation, fee recipient change, new commits with a compare link, new launches by the deployer |
 | Strings | **WORKING** | Dossiers link through a shared deployer, fee recipient or GitHub repo (**confirmed**) or through your own notes (**hypothesis**) |
 | Graph | **WORKING** | All dossiers as draggable nodes and connections |
 | Publish / Save to my brain | **WORKING** | A dossier is packed into the link itself. Status, reason and notes stay private unless you opt in |
-| Live desk | **WORKING** | Every Pons V2 launch and every bonding-curve trade of the last ten minutes, read every two seconds: market cap, curve progress, buys and sells, volume, wallets, sparkline and the deployer's earlier launches per token |
+| Live desk | **WORKING** | Every Pons V2 launch and every bonding-curve trade of the last ten minutes, read every two seconds: market cap, curve progress, buys and sells, volume, wallets, sparkline and the deployer's earlier launches per token; sorted by most traded, new launches, near graduation or repeat deployers |
+| Token analytics | **WORKING** | On every Pons V2 dossier: all-time high, all-time volume, trades and wallets; bought vs sold, buyers vs sellers, largest trade, top-10 wallet share, whether the deployer traded; a buy/sell pressure chart with net flow, a wallet map and a top wallets table tagged Deployer, Fee recipient and Early |
 | Charts | **WORKING** | Market cap candles from every `CurveBuy` / `CurveSell` since launch, continued with Uniswap v4 `Swap` events after graduation; trade-count or time candles |
 | Quote assets | **WORKING** | Launches paired with USDG, cbBTC or tokenized stocks are priced in their own asset (decimals read on-chain, USD from DexScreener) |
 | Ticker tape | **WORKING** | The most traded tokens of the last ten minutes, on every page |
@@ -71,11 +75,9 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 
 ## What it looks like
 
-<p align="center"><img src="assets/demo.gif" width="100%" alt="RABIQ walkthrough on Robinhood Chain mainnet: the live case file, the number, serial launchers, the live wire, a dossier and the graph" /></p>
+A dossier on a live Pons V2 launch: market cap, all-time high, curve progress, all-time volume, every trade since launch as candles, and the deployer's four launches around it.
 
-The HOP OUT dossier. Its deployer also launched ESSAY, so RABIQ puts the ESSAY research at the top. The stamp on the right is your decision.
-
-![RABIQ dossier with the memory panel and on-chain facts](assets/screens/dossier.webp)
+![RABIQ dossier: stats, every trade since launch as candles, deployer constellation](assets/screens/dossier.webp)
 
 | Dossiers as a graph | A published dossier, ready for “Save to my brain” |
 | --- | --- |
@@ -118,6 +120,35 @@ node scripts/landing-data.ts   # rewrites public/landing.json; raw logs are cach
 6. **Meet the deployer again.** Dig a fresh CA from the same wallet. **RABIQ remembers** shows the earlier dossier, its decision and the question you left open.
 7. **Publish.** One link carries the thesis, checks, open questions, sources and connected CAs. Whoever opens it can save it into their own burrow and keep going.
 
+## Live desk
+
+<p align="center"><img src="assets/screens/desk.webp" width="100%" alt="RABIQ live desk: launches, curve trades, volume, wallets, graduations and repeat-deployer share for the last ten minutes, a table of 60 tokens and the inspector with a chart" /></p>
+
+The desk polls Robinhood Chain every two seconds. One `eth_getLogs` request per poll returns every `TokenLaunched`, `PoolGraduated`, `CurveBuy` and `CurveSell` since the previous poll. A new launch lands on screen a few seconds after the public RPC serves its block.
+
+| Part | What it shows |
+| --- | --- |
+| Tiles | Launches, curve trades, volume and trading wallets in the last ten minutes; graduations in the last 24 hours; the share of launches in the window that came from a deployer with an earlier launch |
+| Table | 60 tokens: market cap, 10-minute change, curve progress, buys / sells, volume, traders, the deployer's earlier launches, a sparkline. Tabs: **Most traded**, **New launches**, **Near graduation**, **Repeat deployers**; filter by ticker or address |
+| Inspector | The selected token's chart of every trade since launch, curve progress, all-time trades, buys and sells, volume, wallets, age and the deployer's launch count |
+| Trade tape and graduations | The latest 40 trades and the latest 30 graduations to a Uniswap v4 pool from the last day |
+
+## Token analytics
+
+Open any Pons V2 token and the dossier reads every curve trade since its launch (and every Uniswap v4 swap after graduation). Everything below comes from those trades; none of it needs another request.
+
+<p align="center"><img src="assets/screens/flow.webp" width="100%" alt="Flow section: bought vs sold, buyers vs sellers, largest trade, top-10 wallet share, deployer trading, buy/sell pressure chart, wallet map and top wallets table" /></p>
+
+| Block | What it shows |
+| --- | --- |
+| Stats | Market cap, all-time high and the distance from it, curve progress, all-time volume, trades with buys and sells, wallets |
+| Chart | Market cap candles by trade count or by time, with volume bars; a marker where the curve became a v4 pool |
+| Deployer | The deployer's launches as a draggable constellation; graduated tokens in blue |
+| Flow | Bought vs sold and net flow, buyers vs sellers, average and largest trade, the top 10 wallets' share of volume, and what the deployer bought and sold |
+| Pressure | Buy volume above the line, sell volume below, per time bucket, with the running net flow drawn across |
+| Wallets | The 24 busiest wallets as bubbles sized by volume: lime for net buyers, red for net sellers, the deployer ringed; click opens the wallet on Blockscout |
+| Top wallets | Bought, sold, net, trades and share for the 12 busiest wallets, tagged **Deployer**, **Fee recipient** or **Early** (among the first 20 trades) |
+
 ## The dossier
 
 One dossier per chain and contract address. Two tokens with the same ticker are two different dossiers.
@@ -126,6 +157,7 @@ One dossier per chain and contract address. Two tokens with the same ticker are 
 
 | Section | What it holds |
 | --- | --- |
+| **Market and flow** | The live block above: stats, chart, deployer constellation, [token analytics](#token-analytics) |
 | **Decision** | `Watching` · `Researching` · `In position` · `Passed`, plus a private reason |
 | **Thesis** | What the project is and how you know it |
 | **For / Against** | Arguments on each side, one line each |
@@ -137,9 +169,11 @@ One dossier per chain and contract address. Two tokens with the same ticker are 
 | **Connections** | Every string to another dossier, labelled confirmed or hypothesis |
 | **Timeline** | When the dossier was opened, status changes, answered questions, detected changes |
 
+Thesis, arguments, questions, checks, notes and sources sit in one **Your research** drawer that stays folded until you write something. **All tokens** at the top goes back to the live desk.
+
 ## Deployer memory
 
-For a Pons V2 token, RABIQ reads the factory record with `getLaunchedToken(token)` and gets the **deployer** and **creator fee recipient**. It then collects each `TokenLaunched` event the factory emitted for that deployer, from the first Pons V2 launch (block 27,027,321) to the current head, in bounded block ranges. One Multicall3 call resolves the symbols for all of those tokens.
+For a Pons V2 token, RABIQ reads the factory record with `getLaunchedToken(token)` and gets the **deployer** and **creator fee recipient**. It then collects each `TokenLaunched` event the factory emitted for that deployer, from the first Pons V2 launch (block 27,027,321) to the current head. The deployer is an indexed topic, so the whole history is one `eth_getLogs` request; RABIQ splits the range only when the RPC answers with its 10,000-log cap or a query timeout. One Multicall3 call resolves the symbols for the latest 40 tokens.
 
 Two things happen with that list:
 
@@ -201,7 +235,9 @@ RABIQ treats incoming links as untrusted input. It type-checks each field, caps 
 
 <p align="center"><img src="assets/how-it-works.png" width="100%" alt="How RABIQ works: contract address, sources, snapshot, dossier, strings, publish, RABIQ remembers" /></p>
 
-Token reads are batched through Multicall3 (name, symbol, launch record and the L2 block number via ArbSys) so a full check stays within a handful of RPC requests. Launch history is read in bounded ranges, sequentially, with backoff when the public RPC rate-limits.
+Token reads are batched through Multicall3 (name, symbol, launch record and the L2 block number via ArbSys) so a full check stays within a handful of RPC requests. Logs filtered by an indexed topic (a deployer, a token, a curve address) are read over the whole history in one request.
+
+Every request goes through one paced queue with two lanes. Reads for what is on screen (the desk poll, the open dossier) always go first. Background history reads get a slot every 1.5 seconds. A throttled answer pauses the queue, so the other pending reads do not walk into the same limit.
 
 ## Quick start
 
@@ -287,8 +323,9 @@ updated: 2026-09-14T09:00:00.000Z
 
 | Source | What RABIQ reads | Used for |
 | --- | --- | --- |
-| `rpc.mainnet.chain.robinhood.com` | Multicall3 `eth_call` to the Pons V2 factory `0x7eD5…EC7e`, ERC-20 `name` / `symbol`, ArbSys block number; `TokenLaunched` logs | deployer, fee recipient, phase, creator tax, deployer launches |
-| `api.dexscreener.com` | public token pairs | FDV, liquidity, 24h volume |
+| `rpc.mainnet.chain.robinhood.com` | Multicall3 `eth_call` to the Pons V2 factory `0x7eD5…EC7e`, ERC-20 `name` / `symbol` / `decimals`, curve `getReserves` / `realQuoteReserve`, ArbSys block number; `TokenLaunched`, `PoolGraduated`, `CurveBuy`, `CurveSell` and Uniswap v4 `Swap` logs | deployer, fee recipient, phase, creator tax, deployer launches, curve price and progress, every trade, the live desk |
+| `api.dexscreener.com` | public token pairs | FDV, liquidity, 24h volume; USD prices of non-ETH quote assets |
+| `api.coinbase.com` | ETH-USD spot | USD values of ETH-paired launches |
 | `api.github.com` | public repository metadata and head commit | repository snapshot and new-commit detection |
 
 ## Storage
@@ -301,7 +338,8 @@ updated: 2026-09-14T09:00:00.000Z
 
 - **Pons V2 only.** Deployer and fee recipient come from the Pons V2 factory. Tokens from other launchpads get market and GitHub data without deployer memory.
 - **One browser, one burrow.** The web app has no accounts and no sync. Move a burrow between devices with Export and Import.
-- **Public RPC rate limits.** Robinhood Chain's public endpoint throttles bursts. RABIQ batches and retries requests; a check right after many others can take a few seconds.
+- **Public RPC limits.** Robinhood Chain's public endpoint throttles by load and serves its latest block two to three seconds behind. RABIQ batches, paces and retries requests; opening a token nobody has read recently can take 10 to 20 seconds.
+- **Wallets after graduation.** A Uniswap v4 `Swap` names the router that sent it, not the trader, so wallet figures on graduated tokens use the bonding-curve trades only.
 - **GitHub without a token** allows 60 API requests per hour per IP address, which covers normal use.
 - **Market data** comes from DexScreener. A token without a DexScreener pair shows no FDV or liquidity.
 - **Note mentions stay hypotheses.** A mention records that you wrote about both tokens. RABIQ does not treat it as evidence of a relationship.
@@ -358,8 +396,8 @@ src/lib/pons.ts      bonding curve state, curve trades, v4 pool swaps, quote ass
 src/lib/desk.ts      live market store: launches and trades in a rolling window
 src/deskview.ts      live desk: tiles, table, inspector, trade tape
 src/chart.ts         sparklines and candle charts
-src/dossierlive.ts   dossier market block and deployer constellation
-src/chrome.ts        header, ticker tape, cursor
+src/dossierlive.ts   dossier market block, token analytics, deployer constellation
+src/chrome.ts        header, ticker tape
 src/docs.ts          How to use and Docs pages
 src/landing.ts       landing page: live case file, the number, serial launchers
 src/main.ts          web app
