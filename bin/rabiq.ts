@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { blank, factsMarkdown, FACTS_END, FACTS_START, toMarkdown } from '../src/lib/burrow.ts';
 import { normalizeAddress } from '../src/lib/chain.ts';
 import { demoBurrow } from '../src/lib/demo.ts';
-import { diffSnapshots, short, takeSnapshot, usd, type Snapshot } from '../src/lib/sources.ts';
+import { diffSnapshots, readLaunches, short, takeSnapshot, usd, type Snapshot } from '../src/lib/sources.ts';
 
 const dir = process.env.RABIQ_BURROW ?? join(process.cwd(), 'burrow');
 const snapDir = join(dir, '.snapshots');
@@ -56,6 +56,11 @@ async function dig(input: string, repos: string[]) {
 
   process.stdout.write(`${c.dim}  reading Robinhood Chain, DexScreener${sources.length ? ', GitHub' : ''}…${c.x}\n`);
   const snap = await takeSnapshot(ca, sources);
+  // the web app loads deployer history after the facts; the CLI can simply wait for it
+  if (snap.chain?.deployer) {
+    const hist = await readLaunches(snap.chain.deployer, snap.chain.block, ca);
+    if (hist) { snap.launches = hist.list; snap.launchTotal = hist.total; }
+  }
   const ch = snap.chain, m = snap.market;
   if (!ch && !m) throw new Error('nothing found for this address on Robinhood Chain');
 

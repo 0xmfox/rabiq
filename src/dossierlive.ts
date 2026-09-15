@@ -68,9 +68,9 @@ function flowHTML(ca: string, s: Snapshot | undefined, intro = false) {
     <div class="dlive-stats"><dl>
       ${cell('Bought', `<span class="lime">${money(buyVol)}</span>`, `${((buyVol / total) * 100).toFixed(0)}% of volume`)}
       ${cell('Sold', `<span class="red">${money(sellVol)}</span>`, `net ${net >= 0 ? '+' : '−'}${money(Math.abs(net))}`)}
-      ${cell('Buyers · sellers', `${fmt(buyers)} <span class="dim">/</span> ${fmt(sellers)}`, `avg trade ${money(total / trades.length)}`)}
+      ${cell('Buyers · sellers', `${fmt(buyers)} <span class="dim">/</span> ${fmt(sellers)}`, live.poolFrom ? 'on the curve' : `avg trade ${money(total / trades.length)}`)}
       ${cell('Largest trade', money(largest), `${((largest / total) * 100).toFixed(1)}% of volume`)}
-      ${cell('Top 10 wallets', `${(top10 * 100).toFixed(0)}%`, 'of all volume')}
+      ${cell('Top 10 wallets', `${(top10 * 100).toFixed(0)}%`, live.poolFrom ? 'of curve volume' : 'of all volume')}
       ${cell('Deployer traded', depW ? money(depW.buy + depW.sell) : 'No', depW ? `bought ${money(depW.buy)} · sold ${money(depW.sell)}` : `${earlyOut} of the ${early.size} first wallets exited`)}
     </dl></div>
     <div class="flow-grid">
@@ -144,7 +144,8 @@ function statsHTML(ca: string, s: Snapshot | undefined) {
   const ath = trades.reduce((a, t) => Math.max(a, t.price), 0);
   const last = trades[trades.length - 1]?.price ?? 0;
   const buys = trades.filter((t) => t.side === 'buy').length;
-  const wallets = new Set(trades.map((t) => t.who)).size;
+  // v4 swaps name the router, not the trader: count wallets from curve trades
+  const wallets = new Set(trades.filter((t) => t.curve.length <= 42).map((t) => t.who)).size;
   const vol = trades.reduce((a, t) => a + t.amt, 0);
   const cell = (label: string, value: string, sub = '') => `<div><dt>${label}</dt><dd>${value}</dd>${sub ? `<span>${sub}</span>` : ''}</div>`;
   const wait = live?.loading ? '<span class="skeleton" style="width:60px"></span>' : '—';
@@ -154,7 +155,7 @@ function statsHTML(ca: string, s: Snapshot | undefined) {
     ${cv && s?.chain?.phase === 'curve' ? cell('Curve', `${(cv.progress * 100).toFixed(1)}%`, `${ethShort(cv.raisedEth)} of ${fmt(cv.thresholdEth)} ${esc(cv.quote ?? 'ETH')}`) : cell('Liquidity', m?.liquidityUsd != null ? usdShort(m.liquidityUsd) : '—', s?.chain?.phase === 'graduated' ? 'Uniswap v4 pool' : '')}
     ${cell('Volume · all time', trades.length ? (usd ? usdShort(vol * usd) : `${ethShort(vol)} ${esc(sym)}`) : wait, m?.volume24h != null ? `${usdShort(m.volume24h)} in 24h` : '')}
     ${cell('Trades', trades.length ? fmt(trades.length) : wait, trades.length ? `<b class="lime">${fmt(buys)}</b> buys · <b class="red">${fmt(trades.length - buys)}</b> sells` : '')}
-    ${cell('Wallets', trades.length ? fmt(wallets) : wait, 'bought or sold')}
+    ${cell('Wallets', trades.length ? fmt(wallets) : wait, live?.poolFrom ? 'traded on the curve' : 'bought or sold')}
   </dl>`;
 }
 
