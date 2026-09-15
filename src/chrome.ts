@@ -72,7 +72,7 @@ const idle = () => Array.from({ length: 8 }, () => '<span class="tape-item idle"
 
 function tapeItems() {
   const usd = lastEthUsd();
-  const hot = rank('hot').slice(0, 24);
+  const hot = rank('hot').slice(0, 32);
   if (hot.length < 4) return null;
   return hot.map((t) => {
     const ch = change(t), p = priceOf(t);
@@ -87,8 +87,8 @@ function mountTape(el: HTMLElement) {
   let pending: string | null = null, first = true;
   const apply = (html: string) => {
     sets.forEach((s) => (s.innerHTML = html));
-    // constant speed whatever the content width
-    track.style.setProperty('--dur', `${Math.max(30, sets[0].scrollWidth / 42)}s`);
+    // constant speed whatever the content width; capped so a loop (and the next content swap) never takes too long
+    track.style.setProperty('--dur', `${Math.min(22, Math.max(10, sets[0].scrollWidth / 55))}s`);
   };
   // swap content only when the loop restarts, so the tape never jumps
   track.addEventListener('animationiteration', () => { if (pending) { apply(pending); pending = null; } });

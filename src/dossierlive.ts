@@ -1,6 +1,7 @@
 // The market block of a dossier: every trade since launch as candles, and the deployer's launches as a constellation.
 import { ethShort, mountChart, usdShort } from './chart.ts';
 import { client } from './lib/chain.ts';
+import { desk } from './lib/desk.ts';
 import { esc } from './lib/md.ts';
 import {
   calibrate, curveTrades, launchBlocks, launchRecords, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY,
@@ -129,8 +130,14 @@ async function load(ca: string, s: Snapshot, repaint: () => void) {
     await loadQuotes([pair]);
     live.quote = quoteOf(pair);
     const dec = live.quote?.decimals ?? 18;
-    live.launchBlock ??= (await launchBlocks([ca], head)).get(ca.toLowerCase())?.block ?? null;
-    const from = BigInt(live.launchBlock ?? Number(head) - 850_000);
+    // desk already knows the launch block for anything it has seen live; that's free. Otherwise chase it in the
+    // background — it is a bounded log scan — and paint immediately with a recent window instead of waiting on it.
+    live.launchBlock ??= desk.tokens.get(ca.toLowerCase())?.launchBlock ?? null;
+    if (live.launchBlock == null) {
+      // cached for the next load (e.g. a manual refresh); this window's chart already painted with the fallback
+      launchBlocks([ca], head).then((m) => { const b = m.get(ca.toLowerCase())?.block; if (b != null) live.launchBlock = b; }).catch(() => null);
+    }
+    const from = BigInt(live.launchBlock ?? Number(head) - 100_000);
     const curve = c.curve ? await curveTrades(c.curve, from, head, dec) : [];
     let pool: Trade[] = [];
     if (c.phase === 'graduated' && c.poolFee != null && c.tickSpacing != null) {
