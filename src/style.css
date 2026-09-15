@@ -112,7 +112,7 @@ textarea.field { resize: vertical; min-height: 88px; line-height: 1.55; }
 
 /* layout */
 .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 40px; max-width: 1440px; margin: 0 auto; padding: 28px 24px 80px; }
-@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 .page.play { animation: rise 460ms var(--ease-out) both; }
 .side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 88px; align-self: start; }
 @media (max-width: 980px) { .side { position: static; order: 2; } }
