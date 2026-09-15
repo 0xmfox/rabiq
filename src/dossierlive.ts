@@ -1,10 +1,10 @@
 // The market block of a dossier: every trade since launch as candles, and the deployer's launches as a constellation.
 import { ethShort, mountChart, usdShort } from './chart.ts';
-import { client } from './lib/chain.ts';
+import { client, EXPLORER } from './lib/chain.ts';
 import { desk } from './lib/desk.ts';
 import { esc } from './lib/md.ts';
 import {
-  calibrate, curveTrades, FIRST_BLOCK, launchRecords, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY,
+  blockTime, calibrate, curveTrades, FIRST_BLOCK, launchRecords, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY,
   type Quote, type Trade,
 } from './lib/pons.ts';
 import { short, ticker, type Snapshot } from './lib/sources.ts';
@@ -20,9 +20,121 @@ export function dossierLiveHTML(ca: string, s: Snapshot | undefined, intro: bool
     <div class="dlive-stats" data-dstats>${statsHTML(ca, s)}</div>
     <div class="dlive-grid">
       <div class="dlive-chart"><div class="dlive-head"><span class="label"><span>Chart</span>Every trade since launch</span><span class="muted small" data-dnote></span></div><div data-dchart><div class="chart-empty"><span class="spin"></span> Reading every trade since launch</div></div></div>
-      <div class="dlive-const"><div class="dlive-head"><span class="label"><span>Deployer</span>${c.deployer ? short(c.deployer) : '—'}</span><span class="muted small">${s?.launchTotal ? `${fmt(s.launchTotal)} launch${s.launchTotal === 1 ? '' : 'es'}` : ''}</span></div><div data-dconst>${constellationHTML(ca, s, cache.get(ca), intro)}</div></div>
+      <div class="dlive-const" data-dconstwrap><div class="dlive-head"><span class="label"><span>Deployer</span>${c.deployer ? short(c.deployer) : '—'}</span><span class="muted small">${s?.launchTotal ? `${fmt(s.launchTotal)} launch${s.launchTotal === 1 ? '' : 'es'}` : ''}</span></div><div data-dconst>${constellationHTML(ca, s, cache.get(ca), intro)}</div></div>
     </div>
+    <div data-dflow>${flowHTML(ca, s)}</div>
   </section>`;
+}
+
+// ---------- trading analytics: everything below is derived from the trades already loaded for the chart ----------
+type Wallet = { who: string; buy: number; sell: number; n: number; first: number };
+
+function wallets(trades: Trade[]): Wallet[] {
+  const m = new Map<string, Wallet>();
+  for (const t of trades) {
+    let w = m.get(t.who);
+    if (!w) m.set(t.who, (w = { who: t.who, buy: 0, sell: 0, n: 0, first: t.block }));
+    w[t.side] += t.amt;
+    w.n++;
+  }
+  return [...m.values()].sort((a, b) => b.buy + b.sell - (a.buy + a.sell));
+}
+
+function flowHTML(ca: string, s: Snapshot | undefined, intro = false) {
+  const live = cache.get(ca);
+  if (!live || live.loading || live.failed || !live.trades.length) return '';
+  const trades = live.trades, q = live.quote, usd = q?.usd ?? null, sym = esc(q?.symbol ?? 'ETH');
+  const money = (v: number) => (usd ? usdShort(v * usd) : `${ethShort(v)} ${sym}`);
+  // v4 pool swaps name the router as sender, not the trader: wallet figures use curve trades only
+  const walletTrades = trades.filter((t) => t.curve.length <= 42);
+  const list = wallets(walletTrades);
+  const walletVol = list.reduce((a, w) => a + w.buy + w.sell, 0) || 1;
+  const buyVol = trades.filter((t) => t.side === 'buy').reduce((a, t) => a + t.amt, 0);
+  const sellVol = trades.filter((t) => t.side === 'sell').reduce((a, t) => a + t.amt, 0);
+  const total = buyVol + sellVol || 1;
+  const top10 = list.slice(0, 10).reduce((a, w) => a + w.buy + w.sell, 0) / walletVol;
+  const largest = trades.reduce((a, t) => Math.max(a, t.amt), 0);
+  const buyers = list.filter((w) => w.buy > 0).length, sellers = list.filter((w) => w.sell > 0).length;
+  const dep = s?.chain?.deployer ?? '', fee = s?.chain?.feeRecipient ?? '';
+  const depW = list.find((w) => w.who === dep);
+  const early = new Set(walletTrades.slice(0, 20).map((t) => t.who));
+  const earlyOut = [...early].filter((w) => { const x = list.find((y) => y.who === w)!; return x.sell >= x.buy * 0.9 && x.sell > 0; }).length;
+  const net = buyVol - sellVol;
+  const cell = (label: string, value: string, sub = '') => `<div><dt>${label}</dt><dd>${value}</dd>${sub ? `<span>${sub}</span>` : ''}</div>`;
+  const tag = (w: string) => (w === dep ? '<em class="wtag dep">Deployer</em>' : w === fee ? '<em class="wtag">Fee recipient</em>' : early.has(w) ? '<em class="wtag early">Early</em>' : '');
+
+  return `<div class="flow${intro ? ' play' : ''}">
+    <div class="dlive-head flow-head"><span class="label"><span>Flow</span>Who trades it</span><span class="muted small">${fmt(trades.length)} trades · ${fmt(list.length)} wallets${live.poolFrom ? ' · wallets from curve trades' : ''}</span></div>
+    <div class="dlive-stats"><dl>
+      ${cell('Bought', `<span class="lime">${money(buyVol)}</span>`, `${((buyVol / total) * 100).toFixed(0)}% of volume`)}
+      ${cell('Sold', `<span class="red">${money(sellVol)}</span>`, `net ${net >= 0 ? '+' : '−'}${money(Math.abs(net))}`)}
+      ${cell('Buyers · sellers', `${fmt(buyers)} <span class="dim">/</span> ${fmt(sellers)}`, `avg trade ${money(total / trades.length)}`)}
+      ${cell('Largest trade', money(largest), `${((largest / total) * 100).toFixed(1)}% of volume`)}
+      ${cell('Top 10 wallets', `${(top10 * 100).toFixed(0)}%`, 'of all volume')}
+      ${cell('Deployer traded', depW ? money(depW.buy + depW.sell) : 'No', depW ? `bought ${money(depW.buy)} · sold ${money(depW.sell)}` : `${earlyOut} of the ${early.size} first wallets exited`)}
+    </dl></div>
+    <div class="flow-grid">
+      <div><div class="dlive-head"><span class="label"><span>Pressure</span>Buys against sells</span><span class="muted small">net flow line</span></div>${pressureSVG(trades)}</div>
+      <div><div class="dlive-head"><span class="label"><span>Wallets</span>Map by volume</span><span class="muted small">top ${Math.min(24, list.length)}</span></div>${walletMapSVG(list.slice(0, 24), s, early)}
+        <div class="const-legend"><span><i class="self"></i>Net buyer</span><span><i class="sell"></i>Net seller</span><span><i class="dep"></i>Deployer</span><span class="muted">Click opens the wallet</span></div></div>
+    </div>
+    <div class="dlive-head"><span class="label"><span>Top wallets</span>By volume</span></div>
+    <div class="wt-scroll"><table class="wt">
+      <thead><tr><th>#</th><th>Wallet</th><th class="r">Bought</th><th class="r">Sold</th><th class="r">Net</th><th class="r">Trades</th><th class="r">Share</th></tr></thead>
+      <tbody>${list.slice(0, 12).map((w, i) => `<tr>
+        <td class="dim">${String(i + 1).padStart(2, '0')}</td>
+        <td><a class="mono" href="${EXPLORER}/address/${w.who}" target="_blank" rel="noopener noreferrer">${short(w.who)}</a>${tag(w.who)}</td>
+        <td class="r lime">${w.buy ? money(w.buy) : '—'}</td>
+        <td class="r red">${w.sell ? money(w.sell) : '—'}</td>
+        <td class="r ${w.buy >= w.sell ? 'lime' : 'red'}">${w.buy >= w.sell ? '+' : '−'}${money(Math.abs(w.buy - w.sell))}</td>
+        <td class="r">${fmt(w.n)}</td>
+        <td class="r"><span class="share" style="--p:${(w.buy + w.sell) / walletVol}"><i></i></span>${(((w.buy + w.sell) / walletVol) * 100).toFixed(1)}%</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+/** Buy volume up, sell volume down per time bucket, with the running net flow drawn across. */
+function pressureSVG(trades: Trade[]) {
+  const W = 640, H = 220, mid = H / 2, n = Math.min(48, Math.max(8, Math.ceil(trades.length / 6)));
+  const t0 = blockTime(trades[0].block), t1 = blockTime(trades[trades.length - 1].block), span = Math.max(1, t1 - t0);
+  const b = Array.from({ length: n }, () => ({ buy: 0, sell: 0 }));
+  for (const t of trades) b[Math.min(n - 1, Math.floor(((blockTime(t.block) - t0) / span) * n))][t.side] += t.amt;
+  const max = Math.max(...b.map((x) => Math.max(x.buy, x.sell)), 1e-18);
+  let run = 0;
+  const nets = b.map((x) => (run += x.buy - x.sell));
+  const nmax = Math.max(...nets.map(Math.abs), 1e-18);
+  const bw = W / n;
+  const bars = b.map((x, i) => {
+    const hb = (x.buy / max) * (mid - 12), hs = (x.sell / max) * (mid - 12);
+    return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(mid - hb).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${hb.toFixed(1)}" class="pb" style="--i:${i}"/><rect x="${(i * bw + 1).toFixed(1)}" y="${mid}" width="${(bw - 2).toFixed(1)}" height="${hs.toFixed(1)}" class="ps" style="--i:${i}"/>`;
+  }).join('');
+  const line = nets.map((v, i) => `${i ? 'L' : 'M'}${(i * bw + bw / 2).toFixed(1)} ${(mid - (v / nmax) * (mid - 12)).toFixed(1)}`).join(' ');
+  const clock = (sec: number) => new Date(sec * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `<svg class="pressure" viewBox="0 0 ${W} ${H + 18}" role="img" aria-label="Buy and sell volume over time">
+    <line x1="0" x2="${W}" y1="${mid}" y2="${mid}" class="pmid"/>${bars}
+    <path d="${line}" class="pnet" pathLength="1"/>
+    <text x="0" y="${H + 14}" class="pt">${clock(t0)}</text><text x="${W}" y="${H + 14}" class="pt" text-anchor="end">${clock(t1)}</text>
+    <text x="4" y="14" class="pt">Buys</text><text x="4" y="${H - 4}" class="pt">Sells</text>
+  </svg>`;
+}
+
+/** Wallets as bubbles around the token: size is volume, colour is which side they ended on. */
+function walletMapSVG(list: Wallet[], s: Snapshot | undefined, early: Set<string>) {
+  const W = 360, H = 300, cx = W / 2, cy = H / 2;
+  const maxV = Math.max(...list.map((w) => w.buy + w.sell), 1e-18);
+  const dep = s?.chain?.deployer ?? '';
+  const nodes = list.map((w, i) => {
+    const ring = i < 8 ? 0 : 1, inRing = ring ? Math.max(1, list.length - 8) : Math.min(8, list.length), idx = ring ? i - 8 : i;
+    const a = (idx / inRing) * Math.PI * 2 - Math.PI / 2 + ring * 0.2;
+    const r = ring ? 124 : 72;
+    return { w, x: cx + Math.cos(a) * r * 1.2, y: cy + Math.sin(a) * r * 0.92, rad: 3.5 + 13 * Math.sqrt((w.buy + w.sell) / maxV), i };
+  });
+  return `<svg class="wmap const" viewBox="0 0 ${W} ${H}" role="img" aria-label="Wallets by volume">
+    ${nodes.map((n) => `<line x1="${cx}" y1="${cy}" x2="${n.x.toFixed(1)}" y2="${n.y.toFixed(1)}" class="const-edge" style="stroke-width:${(0.6 + 2.4 * ((n.w.buy + n.w.sell) / maxV)).toFixed(2)}"/>`).join('')}
+    <g class="const-core"><circle cx="${cx}" cy="${cy}" r="20"/><text x="${cx}" y="${cy + 4}" text-anchor="middle">${esc(ticker(s?.chain?.symbol ?? '').slice(0, 6))}</text></g>
+    ${nodes.map((n) => `<a href="${EXPLORER}/address/${n.w.who}" target="_blank" rel="noopener noreferrer"><g class="wnode ${n.w.buy >= n.w.sell ? 'buy' : 'sell'}${n.w.who === dep ? ' dep' : ''}" style="--i:${n.i}" transform="translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})"><circle r="${n.rad.toFixed(1)}"/><title>${short(n.w.who)}${n.w.who === dep ? ' · deployer' : early.has(n.w.who) ? ' · early buyer' : ''} · ${fmt(n.w.n)} trades</title>${n.i < 5 ? `<text y="${(n.rad + 12).toFixed(1)}" text-anchor="middle">${n.w.who === dep ? 'DEP' : n.w.who.slice(2, 6)}</text>` : ''}</g></a>`).join('')}
+  </svg>`;
 }
 
 function statsHTML(ca: string, s: Snapshot | undefined) {
@@ -172,6 +284,7 @@ function paint(introChart: boolean) {
   if (live.failed) { chart.innerHTML = '<div class="chart-empty">The chain is busy. Refresh to try again.</div>'; return; }
   const q = live.quote;
   current.cleanup = mountChart(chart, live.trades, { usd: q?.usd ?? null, quote: q?.symbol ?? 'ETH', intro: introChart, marks: live.poolFrom ? [{ block: live.poolFrom, label: 'Uniswap v4 pool' }] : [] });
+  el.querySelector('[data-dflow]')!.innerHTML = flowHTML(ca, s, introChart);
   el.querySelector('[data-dnote]')!.textContent = live.poolFrom ? 'Curve trades, then pool swaps' : s.chain?.phase === 'curve' ? 'Bonding curve trades' : 'Curve trades';
 }
 

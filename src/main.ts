@@ -221,6 +221,19 @@ function listBlock(d: Dossier, key: 'pros' | 'cons' | 'checked', placeholder: st
     ${locked ? '' : `<form class="adder" data-form="add" data-list="${key}"><input class="field" name="text" placeholder="${placeholder}" autocomplete="off"><button class="btn sm">Add</button></form>`}`;
 }
 
+// the research drawer stays as the reader left it across re-renders; it opens by itself once anything is written
+const researchOpen = new Set<string>();
+document.addEventListener('toggle', (e) => {
+  const el = e.target as HTMLElement;
+  if (!(el instanceof HTMLDetailsElement) || !el.dataset.research) return;
+  if (el.open) researchOpen.add(el.dataset.research); else researchOpen.delete(el.dataset.research);
+}, true);
+const researchCount = (d: Dossier) => {
+  const n = d.pros.length + d.cons.length + d.questions.length + d.checked.length + d.sources.length + (d.thesis.trim() ? 1 : 0) + (d.notes.trim() ? 1 : 0);
+  return n ? `${n} entr${n === 1 ? 'y' : 'ies'}` : 'thesis, arguments, questions, notes';
+};
+const hasResearch = (d: Dossier) => researchCount(d).includes('entr');
+
 function dossierView(d: Dossier, opts: { locked?: boolean; publishedLinks?: Published['links'] } = {}) {
   const all = burrow.all();
   const links = findLinks(opts.locked ? all.concat(all.some((x) => x.id === d.id) ? [] : [d]) : all);
@@ -255,6 +268,7 @@ function dossierView(d: Dossier, opts: { locked?: boolean; publishedLinks?: Publ
       }).join('');
 
   return `<div class="dossier">
+    ${ro ? '' : '<a class="back" href="#/app"><span>←</span> All tokens</a>'}
     ${d.demo ? '<div class="demo-flag">Demo dossier. Addresses, numbers and repositories are invented.</div>' : ''}
     <section class="dhead${once(`dhead:${d.id}`)}">
       <div class="dhead-main">
@@ -282,6 +296,7 @@ function dossierView(d: Dossier, opts: { locked?: boolean; publishedLinks?: Publ
         ${ro ? '' : `<section class="card"><h2>Decision</h2>
           <div class="statuses${statusSlide?.id === d.id ? ' slide' : ''}" style="--idx:${STATUSES.findIndex((st) => st.id === d.status)};--from:${statusSlide?.id === d.id ? statusSlide.from : 0}">${STATUSES.map((st) => `<button class="st-${st.id} ${d.status === st.id ? 'on' : ''}" data-act="status" data-status="${st.id}">${st.label}</button>`).join('')}</div>
           <input class="field" data-field="reason" placeholder="Reason (private)" value="${esc(d.reason)}"></section>`}
+        <details class="research" data-research="${d.id}"${ro || researchOpen.has(d.id) || hasResearch(d) ? ' open' : ''}><summary>Your research<span class="aside">${researchCount(d)}</span></summary>
         <section class="card"><h2>Thesis</h2>${ro ? `<div class="notes-view">${md(d.thesis || '—', resolve)}</div>` : `<textarea class="field" data-field="thesis" placeholder="What is this project and how do you know?">${esc(d.thesis)}</textarea>`}</section>
         <section class="card two">
           <div><h2>For</h2>${listBlock(d, 'pros', 'Add an argument for', ro)}</div>
@@ -295,15 +310,16 @@ function dossierView(d: Dossier, opts: { locked?: boolean; publishedLinks?: Publ
         <section class="card"><h2>Notes <span class="aside">Markdown · [[SYMBOL]] links</span>${ro ? '' : `<button class="btn sm ghost" data-act="notes-mode">${notesEdit ? 'Preview' : 'Edit'}</button>`}</h2>
           ${!ro && notesEdit ? `<textarea class="field" data-field="notes" rows="10" placeholder="Anything. Paste addresses, write [[MOLE]] to link another dossier.">${esc(d.notes)}</textarea>` : `<div class="notes-view">${md(d.notes || (ro ? '—' : 'No notes.'), resolve)}</div>`}
         </section>
-      </div>
-      <div class="col">
-        ${factsCard(d, all)}
-        <section class="card"><h2>Connections <span class="aside">${opts.publishedLinks ? opts.publishedLinks.length : mine.length}</span></h2>
-          <div class="conns">${connections || '<div class="empty-line">No connections. Dossiers connect through a shared deployer, fee recipient, repository or your notes.</div>'}</div></section>
         <section class="card"><h2>Sources</h2>
           <ul class="items sources">${d.sources.map((u, i) => `<li><a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>${ro ? '' : `<button class="x" data-act="del-item" data-list="sources" data-i="${i}">✕</button>`}</li>`).join('') || '<li class="empty-line">No sources.</li>'}</ul>
           ${ro ? '' : '<form class="adder" data-form="add" data-list="sources"><input class="field" name="text" placeholder="Add a link" autocomplete="off"><button class="btn sm">Add</button></form>'}
         </section>
+        </details>
+      </div>
+      <div class="col">
+        ${factsCard(d, all)}
+        ${connections ? `<section class="card"><h2>Connections <span class="aside">${opts.publishedLinks ? opts.publishedLinks.length : mine.length}</span></h2>
+          <div class="conns">${connections}</div></section>` : ''}
         ${ro ? '' : `<section class="card"><h2>Timeline</h2><div class="log">${d.log.slice().reverse().map((e) => `<div><b>${new Date(e.at).toLocaleString()}</b> · ${esc(e.text)}</div>`).join('')}</div></section>`}
       </div>
     </div>

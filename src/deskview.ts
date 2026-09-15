@@ -34,7 +34,7 @@ export function deskHTML() {
       <div class="desk-title">
         <p class="label"><span>Live desk</span>Pons V2 · Robinhood Chain</p>
         <h1 class="display">Every launch<em>.</em><br>Every trade<em>.</em></h1>
-        <p class="lede">RABIQ reads every Pons V2 launch and every bonding-curve trade from the last ${Math.round((WINDOW * 0.1) / 60)} minutes straight from Robinhood Chain, every five seconds. Pick a row to see its chart and its deployer.</p>
+        <p class="lede">RABIQ reads every Pons V2 launch and every bonding-curve trade from the last ${Math.round((WINDOW * 0.1) / 60)} minutes straight from Robinhood Chain, every two seconds. Pick a row to see its chart and its deployer.</p>
         <form class="dig big" data-form="dig"><input class="field" name="ca" placeholder="0x… any contract address" autocomplete="off" spellcheck="false"><button class="btn primary">Open file</button></form>
       </div>
       <div class="tiles" data-desk="tiles">${tiles(true)}</div>

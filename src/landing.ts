@@ -59,7 +59,7 @@ export function landingHTML() {
     <div class="now-grid">
       <div>
         <h2 class="lp-h2 rv" style="--i:1">The last ten minutes on Pons V2.</h2>
-        <p class="lp-sub rv" style="--i:2">RABIQ reads every launch and every bonding-curve trade from Robinhood Chain, every five seconds.</p>
+        <p class="lp-sub rv" style="--i:2">RABIQ reads every launch and every bonding-curve trade from Robinhood Chain, every two seconds.</p>
         <dl class="now-stats">
           <div class="rv" style="--i:3"><dt>Launches · 10m</dt><dd data-now="launches"><span class="skeleton"></span></dd></div>
           <div class="rv" style="--i:4"><dt>Curve trades · 10m</dt><dd data-now="trades"><span class="skeleton"></span></dd></div>

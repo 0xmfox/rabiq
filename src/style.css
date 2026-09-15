@@ -389,3 +389,10 @@ dialog .row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
   .statuses.slide::before { animation: none; }
   .block-live i, .spin { animation: none; }
 }
+
+/* thin dark scrollbars everywhere */
+* { scrollbar-width: thin; scrollbar-color: rgba(232, 240, 222, 0.14) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(232, 240, 222, 0.12); border: 2px solid transparent; border-radius: 8px; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(232, 240, 222, 0.24); }

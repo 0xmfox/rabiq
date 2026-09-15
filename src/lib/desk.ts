@@ -1,14 +1,14 @@
 // Live Pons V2 market: every launch and every curve trade in a rolling window, polled from the public RPC.
 import { parseAbiItem, type Address } from 'viem';
-import { client, launchEvent, PONS_V2_FACTORY } from './chain.ts';
+import { bgClient, client, launchEvent, PONS_V2_FACTORY } from './chain.ts';
 import { noteBlock } from './live.ts';
 import {
-  allTrades, calibrate, curveStates, curveTokens, deployerLaunches, ETH_QUOTE, launchBlocks, launchRecords, loadQuotes, logsSplit, normTrade, quoteOf,
+  calibrate, curveBuy, curveSell, curveStates, curveTokens, deployerLaunches, ETH_QUOTE, launchRecords, loadQuotes, logsSplit, normTrade, quoteOf, toTrade,
   type Curve, type Trade,
 } from './pons.ts';
 
 export const WINDOW = 6_000; // blocks, ~10 minutes at ~0.1 s
-const POLL_MS = 5_000;
+const POLL_MS = 2_000; // a poll is ~4 requests now; launches land every ~2.5 s
 const gradEvent = parseAbiItem('event PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)');
 
 export type Tok = {
@@ -41,7 +41,7 @@ export type Desk = {
 
 export const desk: Desk = { head: 0, tokens: new Map(), launches: [], tape: [], graduations: [], ready: false, loadedAt: 0 };
 const byCurve = new Map<string, string>();
-const deployers = new Map<string, number[]>(); // deployer -> launch blocks, oldest first
+const deployers = new Map<string, { token: string; block: number }[]>(); // deployer -> launches, oldest first
 const pendingCurves = new Set<string>();
 const listeners = new Set<() => void>();
 let last = 0n;
@@ -89,20 +89,31 @@ async function poll() {
   const from = first ? head - BigInt(WINDOW) : last + 1n;
   if (first) await calibrate(head).catch(() => null);
 
-  // launches and trades since the previous poll
-  const [launchLogs, trades] = await Promise.all([
-    logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, fromBlock: a, toBlock: b }), from, head),
-    allTrades(from, head),
-  ]);
+  // launches, graduations and every curve trade since the previous poll in ONE request: the three event
+  // signatures OR'd in topic0. Launch and graduation logs are kept only when the factory emitted them.
+  const logs = await logsSplit((a, b) => client.getLogs({ events: [launchEvent, gradEvent, curveBuy, curveSell], fromBlock: a, toBlock: b }), from, head);
+  const factory = PONS_V2_FACTORY.toLowerCase();
   const fresh: Tok[] = [];
-  for (const l of launchLogs) {
-    const token = String(l.args.token).toLowerCase(), deployer = String(l.args.deployer).toLowerCase(), block = Number(l.blockNumber);
-    const t = addTok(token, String(l.args.curve).toLowerCase(), deployer, block, String(l.args.pairToken ?? ETH_QUOTE).toLowerCase());
-    fresh.push(t);
-    desk.launches.push({ token, block });
-    // blocks the desk watched itself extend a deployer's known history
-    const known = deployers.get(deployer);
-    if (known && !known.includes(block)) known.push(block);
+  const trades: Trade[] = [];
+  for (const l of logs as any[]) {
+    if (!l.args) continue;
+    const fromFactory = String(l.address).toLowerCase() === factory;
+    if (l.eventName === 'TokenLaunched' && fromFactory) {
+      const token = String(l.args.token).toLowerCase(), deployer = String(l.args.deployer).toLowerCase(), block = Number(l.blockNumber);
+      const t = addTok(token, String(l.args.curve).toLowerCase(), deployer, block, String(l.args.pairToken ?? ETH_QUOTE).toLowerCase());
+      fresh.push(t);
+      desk.launches.push({ token, block });
+      // blocks the desk watched itself extend a deployer's known history
+      const known = deployers.get(deployer);
+      if (known && !known.some((x) => x.token === token)) known.push({ token, block });
+    } else if (l.eventName === 'PoolGraduated' && fromFactory) {
+      const token = String(l.args.token).toLowerCase();
+      desk.graduations.push({ token, block: Number(l.blockNumber) });
+      const t = desk.tokens.get(token);
+      if (t) t.phase = 2;
+    } else if (l.eventName === 'CurveBuy' || l.eventName === 'CurveSell') {
+      trades.push(toTrade(l));
+    }
   }
   for (const tr of trades) {
     const token = byCurve.get(tr.curve);
@@ -110,18 +121,41 @@ async function poll() {
     const t = desk.tokens.get(token)!;
     t.trades.push(normTrade(tr, t.dec));
   }
+  last = head; // everything in the range is attached; a later failure must not read it twice
+  desk.head = Number(head);
 
-  // curves trading in the window whose launch is older than the window
+  // symbols for new launches (and anything a failed poll left unnamed), graduations in the same multicall
+  const unnamed = [...desk.tokens.values()].filter((t) => !t.symbol);
+  const ungradNamed = desk.graduations.filter((g) => g.symbol === undefined);
+  if (unnamed.length || ungradNamed.length) {
+    const recs = await launchRecords([...new Set([...unnamed.map((t) => t.token), ...ungradNamed.map((g) => g.token)])]);
+    for (const t of unnamed) {
+      const r = recs.get(t.token);
+      if (r) { t.symbol = r.symbol; t.name = r.name; t.phase = Math.max(t.phase, r.phase); t.threshold = r.threshold; }
+    }
+    for (const g of ungradNamed) g.symbol = recs.get(g.token)?.symbol ?? desk.tokens.get(g.token)?.symbol ?? '';
+  }
+
+  // curve state for everything that moved, then paint: a launch is on screen one poll after it happens
+  await quotesFor(fresh);
+  const moved = [...new Set([...fresh.map((t) => t.curve), ...trades.map((t) => t.curve)])].filter((c) => byCurve.has(c));
+  await readStates(first ? [...desk.tokens.values()].map((t) => t.curve) : moved);
+  prune(head);
+  publish();
+
+  // curves trading in the window whose launch is older than the window: resolved after the paint above
   if (pendingCurves.size) {
-    const curves = [...pendingCurves].slice(0, 600);
+    const curves = [...pendingCurves].slice(0, 200); // spread over polls: a 600-curve multicall is heavy enough to trip the limit
     const map = await curveTokens(curves);
     const recs = await launchRecords([...map.values()]);
+    const added: string[] = [];
     for (const c of curves) {
       pendingCurves.delete(c);
       const token = map.get(c), rec = token ? recs.get(token) : null;
       if (!rec || rec.curve !== c) continue; // same event signature from a contract outside Pons V2
       const t = addTok(token!, c, rec.deployer, null, rec.pairToken);
       t.symbol = rec.symbol; t.name = rec.name; t.phase = rec.phase; t.threshold = rec.threshold;
+      added.push(c);
     }
     for (const tr of trades) {
       const token = byCurve.get(tr.curve);
@@ -129,26 +163,34 @@ async function poll() {
       if (t && !t.trades.some((x) => x.block === tr.block && x.i === tr.i)) t.trades.push(normTrade(tr, t.dec));
     }
     for (const t of desk.tokens.values()) t.trades.sort((a, b) => a.block - b.block || a.i - b.i);
-  }
-  if (fresh.length) {
-    const recs = await launchRecords(fresh.map((t) => t.token));
-    for (const t of fresh) {
-      const r = recs.get(t.token);
-      if (r) { t.symbol = r.symbol; t.name = r.name; t.phase = r.phase; t.threshold = r.threshold; }
-    }
+    await quotesFor([...desk.tokens.values()]);
+    await readStates(added);
+    publish();
   }
 
-  // graduations in the same window as everything else above; the fuller day of history backfills after ready (below)
-  const grads = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: gradEvent, fromBlock: a, toBlock: b }), from, head).catch(() => []);
-  for (const g of grads) {
-    const token = String(g.args.token).toLowerCase();
-    desk.graduations.push({ token, block: Number(g.blockNumber) });
-    const t = desk.tokens.get(token);
-    if (t) t.phase = 2;
-  }
-  await nameGraduations();
+  enrich(head);
+  if (first) backfillGraduations(head);
+}
 
-  // prune the window
+/** Quote decimals for new quote assets (trades normalized as ETH get rescaled) and USD prices, at most once a minute. */
+async function quotesFor(toks: Tok[]) {
+  await loadQuotes([...new Set([ETH_QUOTE, ...toks.map((t) => t.quote)])]).catch(() => null);
+  for (const t of desk.tokens.values()) {
+    const dec = quoteOf(t.quote)?.decimals ?? 18;
+    if (dec !== t.dec) { t.dec = dec; t.trades.forEach((x) => normTrade(x, dec)); }
+  }
+}
+
+/** Reserves of curves still on the curve; swept curves hold nothing worth reading. */
+async function readStates(curves: string[]) {
+  const tokOf = (c: string) => desk.tokens.get(byCurve.get(c)!);
+  const read = curves.filter((c) => tokOf(c)?.phase === 0);
+  if (!read.length) return;
+  const states = await curveStates(read, (c) => tokOf(c)?.dec ?? 18, (c) => tokOf(c)?.threshold ?? null).catch(() => new Map<string, Curve>());
+  for (const [c, s] of states) { const t = tokOf(c); if (t) t.state = s; }
+}
+
+function prune(head: bigint) {
   const floor = Number(head) - WINDOW;
   desk.launches = desk.launches.filter((l) => l.block > floor);
   desk.graduations = desk.graduations.filter((g) => g.block > Number(head) - 850_000);
@@ -156,41 +198,14 @@ async function poll() {
     t.trades = t.trades.filter((x) => x.block > floor);
     if (!t.trades.length && (t.launchBlock == null || t.launchBlock <= floor)) { desk.tokens.delete(k); byCurve.delete(t.curve); }
   }
+}
 
-  // quote assets: decimals first, then prices; trades normalized as ETH get rescaled once decimals are known
-  await loadQuotes([...new Set([...desk.tokens.values()].map((t) => t.quote))]).catch(() => null);
-  for (const t of desk.tokens.values()) {
-    const dec = quoteOf(t.quote)?.decimals ?? 18;
-    if (dec !== t.dec) { t.dec = dec; t.trades.forEach((x) => normTrade(x, dec)); }
-  }
-
-  // curve state for everything that moved
-  const moved = [...new Set([...fresh.map((t) => t.curve), ...trades.map((t) => t.curve)])].filter((c) => byCurve.has(c));
-  // swept curves hold nothing worth reading
-  const read = (first ? [...desk.tokens.values()].map((t) => t.curve) : moved).filter((c) => desk.tokens.get(byCurve.get(c)!)?.phase === 0);
-  const tokOf = (c: string) => desk.tokens.get(byCurve.get(c)!);
-  const states = await curveStates(read, (c) => tokOf(c)?.dec ?? 18, (c) => tokOf(c)?.threshold ?? null);
-  for (const [c, s] of states) {
-    const t = desk.tokens.get(byCurve.get(c)!);
-    if (t) t.state = s;
-  }
-
+function publish() {
   desk.tape = [...desk.tokens.values()].flatMap((t) => t.trades.map((x) => ({ ...x, token: t.token })))
     .sort((a, b) => b.block - a.block || b.i - a.i).slice(0, 80);
-  desk.head = Number(head);
-  last = head;
   desk.ready = true;
   desk.loadedAt = Date.now();
   emit();
-  enrich(head);
-  if (first) backfillGraduations(head);
-}
-
-async function nameGraduations() {
-  const unnamed = desk.graduations.filter((g) => g.symbol === undefined);
-  if (!unnamed.length) return;
-  const recs = await launchRecords(unnamed.map((g) => g.token)).catch(() => new Map());
-  for (const g of unnamed) g.symbol = recs.get(g.token)?.symbol ?? desk.tokens.get(g.token)?.symbol ?? '';
 }
 
 let backfilling = false;
@@ -199,7 +214,7 @@ async function backfillGraduations(head: bigint) {
   if (backfilling) return;
   backfilling = true;
   try {
-    const grads = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: gradEvent, fromBlock: a, toBlock: b }), head - 850_000n, head).catch(() => []);
+    const grads = await logsSplit((a, b) => bgClient.getLogs({ address: PONS_V2_FACTORY, event: gradEvent, fromBlock: a, toBlock: b }), head - 850_000n, head).catch(() => []);
     for (const g of grads) {
       const token = String(g.args.token).toLowerCase();
       if (desk.graduations.some((x) => x.token === token && x.block === Number(g.blockNumber))) continue;
@@ -207,7 +222,11 @@ async function backfillGraduations(head: bigint) {
       const t = desk.tokens.get(token);
       if (t) t.phase = 2;
     }
-    await nameGraduations();
+    const unnamed = desk.graduations.filter((g) => g.symbol === undefined);
+    if (unnamed.length) {
+      const recs = await launchRecords(unnamed.map((g) => g.token)).catch(() => new Map());
+      for (const g of unnamed) g.symbol = recs.get(g.token)?.symbol ?? desk.tokens.get(g.token)?.symbol ?? '';
+    }
     desk.graduations = desk.graduations.filter((g) => g.block > Number(head) - 850_000);
     emit();
   } finally {
@@ -216,31 +235,29 @@ async function backfillGraduations(head: bigint) {
 }
 
 let enriching = false;
-/** Deployer history and launch blocks, for the most active tokens first; slow, so it runs after the first paint. */
+/**
+ * Deployer histories, fresh launches first, then the most traded. A deployer's history also carries each token's launch
+ * block, so older tokens get their age from it without a lookup of their own. Slow, so it runs after the paint.
+ */
 async function enrich(head: bigint) {
   if (enriching) return;
   enriching = true;
   try {
-    // hot tokens first, then every launch in the window, so the repeat share covers them all over a few polls
-    const ranked = rank('hot').slice(0, 60).concat(rank('new'));
-    const needBlock = [...new Set(ranked.filter((t) => t.launchBlock == null).map((t) => t.token))].slice(0, 20);
-    if (needBlock.length) {
-      const blocks = await launchBlocks(needBlock, head);
-      for (const [token, b] of blocks) { const t = desk.tokens.get(token); if (t) t.launchBlock = b.block; }
-    }
+    const ranked = rank('new').concat(rank('hot').slice(0, 60));
     const needDep = [...new Set(ranked.filter((t) => !deployers.has(t.deployer)).map((t) => t.deployer))].slice(0, 20);
-    if (needDep.length) {
-      const hist = await deployerLaunches(needDep, head);
-      for (const [d, list] of hist) deployers.set(d, list.map((x) => x.block));
-    }
+    if (!needDep.length) return;
+    const hist = await deployerLaunches(needDep, head);
+    for (const [d, list] of hist) deployers.set(d, list);
     let changed = false;
     for (const t of desk.tokens.values()) {
       const list = deployers.get(t.deployer);
-      if (!list || t.launchBlock == null) continue;
-      const earlier = list.filter((b) => b < t.launchBlock!).length;
+      if (!list) continue;
+      t.launchBlock ??= list.find((x) => x.token === t.token)?.block ?? null;
+      if (t.launchBlock == null) continue;
+      const earlier = list.filter((x) => x.block < t.launchBlock!).length;
       if (earlier !== t.earlier || list.length !== t.total) { t.earlier = earlier; t.total = list.length; changed = true; }
     }
-    if (changed || needBlock.length) emit();
+    if (changed) emit();
   } catch { /* throttled: the next poll tries again */ } finally {
     enriching = false;
   }
@@ -290,3 +307,4 @@ export function stats() {
 }
 
 export const curveAddress = (token: string) => desk.tokens.get(token)?.curve as Address | undefined;
+

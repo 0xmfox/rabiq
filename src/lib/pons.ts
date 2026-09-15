@@ -1,6 +1,6 @@
 // Pons V2 market reads: bonding curve state, curve trades, graduated v4 pool swaps, deployer launch counts.
 import { encodeAbiParameters, getAddress, keccak256, parseAbi, parseAbiItem, type Address } from 'viem';
-import { client, launchEvent, MULTICALL3, PONS_V2_FACTORY } from './chain.ts';
+import { bgClient, client, launchEvent, MULTICALL3, PONS_V2_FACTORY } from './chain.ts';
 
 export const SUPPLY = 1_000_000_000; // every Pons V2 token mints 1e9 (checked on-chain)
 export const FIRST_BLOCK = 27_027_321n;
@@ -248,21 +248,10 @@ export async function deployerLaunches(deployers: string[], head: bigint): Promi
   const out = new Map<string, { token: string; block: number }[]>(deployers.map((d) => [d, []]));
   for (let i = 0; i < deployers.length; i += GROUP) {
     const group = deployers.slice(i, i + GROUP).map((d) => getAddress(d));
-    const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: group }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
+    const logs = await logsSplit((a, b) => bgClient.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: group }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
     for (const l of logs) out.get(String(l.args.deployer).toLowerCase())?.push({ token: String(l.args.token).toLowerCase(), block: Number(l.blockNumber) });
   }
   for (const list of out.values()) list.sort((a, b) => a.block - b.block);
-  return out;
-}
-
-/** Launch block of tokens (indexed topic filter). */
-export async function launchBlocks(tokens: string[], head: bigint): Promise<Map<string, { block: number; deployer: string }>> {
-  const out = new Map<string, { block: number; deployer: string }>();
-  for (let i = 0; i < tokens.length; i += GROUP) {
-    const group = tokens.slice(i, i + GROUP).map((t) => getAddress(t));
-    const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { token: group }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
-    for (const l of logs) out.set(String(l.args.token).toLowerCase(), { block: Number(l.blockNumber), deployer: String(l.args.deployer).toLowerCase() });
-  }
   return out;
 }
 

@@ -25,14 +25,44 @@ export async function retry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
 }
 
 // The public RPC rate-limits bursts, and its throttled responses fail CORS in the browser.
-// Space requests out so a full check never looks like a burst.
+// Every request waits for a slot GAP_MS apart. Two lanes share the slots: what's on screen (live polls, the open
+// dossier) always goes before background history scans, so a long scan never delays a fresh launch.
 const GAP_MS = 250;
-let nextSlot = 0;
-async function spacedFetch(input: RequestInfo | URL, init?: RequestInit) {
-  const now = Date.now();
-  const wait = Math.max(0, nextSlot - now);
-  nextSlot = Math.max(now, nextSlot) + GAP_MS;
-  if (wait) await new Promise((r) => setTimeout(r, wait));
+// a throttled answer (in the browser a 429 arrives as a CORS failure) pauses both lanes: otherwise every other
+// pending read walks straight into the same limit
+const PAUSE_MS = 1_200;
+// The limit weighs work, not just request count: back-to-back whole-history scans starve even eth_blockNumber.
+// So the background lane gets one slot every BG_GAP_MS and backs off much longer after a throttled answer.
+const BG_GAP_MS = 1_500;
+const BG_PAUSE_MS = 4_000;
+const lanes: (() => void)[][] = [[], []];
+let freeAt = 0;
+let bgFreeAt = 0;
+let timer: ReturnType<typeof setTimeout> | null = null;
+let timerAt = 0;
+function pump() {
+  if (!lanes[0].length && !lanes[1].length) return;
+  const at = lanes[0].length ? freeAt : Math.max(freeAt, bgFreeAt);
+  if (timer) {
+    if (at >= timerAt) return;
+    clearTimeout(timer); // a screen read arrived while waiting out a background pause
+  }
+  timerAt = at;
+  timer = setTimeout(() => {
+    timer = null;
+    const now = Date.now();
+    if (lanes[0].length && now >= freeAt) { freeAt = now + GAP_MS; lanes[0].shift()!(); }
+    else if (lanes[1].length && now >= Math.max(freeAt, bgFreeAt)) { freeAt = now + GAP_MS; bgFreeAt = now + BG_GAP_MS; lanes[1].shift()!(); }
+    pump();
+  }, Math.max(0, at - Date.now()));
+}
+const throttled = () => {
+  freeAt = Math.max(freeAt, Date.now() + PAUSE_MS);
+  bgFreeAt = Math.max(bgFreeAt, Date.now() + BG_PAUSE_MS);
+};
+
+const laneFetch = (lane: 0 | 1) => async (input: RequestInfo | URL, init?: RequestInit) => {
+  await new Promise<void>((r) => { lanes[lane].push(r); pump(); });
   try {
     const r = await fetch(input, init);
     if (r.status === 429) throttled();
@@ -41,24 +71,20 @@ async function spacedFetch(input: RequestInfo | URL, init?: RequestInit) {
     throttled();
     throw e;
   }
-}
-// a throttled answer (in the browser a 429 arrives as a CORS failure) pauses the whole queue, not just the one caller:
-// otherwise every other pending read walks straight into the same limit
-const PAUSE_MS = 1_200;
-function throttled() {
-  nextSlot = Math.max(nextSlot, Date.now() + PAUSE_MS);
-}
+};
 
-export const client = createPublicClient({
-  chain: {
-    id: CHAIN_ID,
-    name: 'Robinhood Chain',
-    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-    rpcUrls: { default: { http: [RPC_URL] } },
-  },
-  // a cold whole-history log query can take 10-20 s on the RPC; viem's default 10 s timeout aborted it and the retry hit 429
-  transport: http(RPC_URL, { retryCount: 3, retryDelay: 1200, timeout: 30_000, fetchFn: spacedFetch }),
-});
+const chain = {
+  id: CHAIN_ID,
+  name: 'Robinhood Chain',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+};
+// a cold whole-history log query can take 10-20 s on the RPC; viem's default 10 s timeout aborted it and the retry hit 429
+const transport = (lane: 0 | 1) => http(RPC_URL, { retryCount: 3, retryDelay: 1200, timeout: 30_000, fetchFn: laneFetch(lane) });
+/** Reads for what's on screen. */
+export const client = createPublicClient({ chain, transport: transport(0) });
+/** Slow history scans; they only get slots the screen isn't using. */
+export const bgClient = createPublicClient({ chain, transport: transport(1) });
 
 const factoryAbi = parseAbi([
   'struct LaunchedToken { address token; address curve; address deployer; address creatorFeeRecipient; address pairToken; uint256 graduationThreshold; uint24 poolFee; int24 tickSpacing; uint16 creatorTaxBps; bool buybackEnabled; uint8 phase; uint256 sweptQuote; uint256 sweptTokens; uint256 sweptAt; bool exists; }',

@@ -1,5 +1,5 @@
 // Market data (DexScreener), repositories (GitHub REST API) and Pons V2 launch history.
-import { client, launchEvent, MULTICALL3, PONS_V2_FACTORY, readToken, retry, type ChainFacts } from './chain.ts';
+import { bgClient, client, launchEvent, MULTICALL3, PONS_V2_FACTORY, readToken, retry, type ChainFacts } from './chain.ts';
 import { curveStates, curveTrades, FIRST_BLOCK, loadQuotes, logsSplit, poolId, poolTrades, quoteOf, SUPPLY, type Curve } from './pons.ts';
 import { parseAbi, getAddress } from 'viem';
 
@@ -95,7 +95,7 @@ export async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
 /** Every Pons V2 launch by this deployer, oldest first: one indexed log query over the whole history. */
 export async function launchTokens(deployer: string, headBlock?: number): Promise<`0x${string}`[]> {
   const head = headBlock ? BigInt(headBlock) : await retry(() => client.getBlockNumber());
-  const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
+  const logs = await logsSplit((a, b) => bgClient.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
   return logs.map((l) => l.args.token!);
 }
 

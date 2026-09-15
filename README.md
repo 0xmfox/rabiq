@@ -60,7 +60,7 @@ Traders drop most trench research into a chat, a screenshot or nowhere. RABIQ pi
 | Strings | **WORKING** | Dossiers link through a shared deployer, fee recipient or GitHub repo (**confirmed**) or through your own notes (**hypothesis**) |
 | Graph | **WORKING** | All dossiers as draggable nodes and connections |
 | Publish / Save to my brain | **WORKING** | A dossier is packed into the link itself. Status, reason and notes stay private unless you opt in |
-| Live desk | **WORKING** | Every Pons V2 launch and every bonding-curve trade of the last ten minutes, read every five seconds: market cap, curve progress, buys and sells, volume, wallets, sparkline and the deployer's earlier launches per token |
+| Live desk | **WORKING** | Every Pons V2 launch and every bonding-curve trade of the last ten minutes, read every two seconds: market cap, curve progress, buys and sells, volume, wallets, sparkline and the deployer's earlier launches per token |
 | Charts | **WORKING** | Market cap candles from every `CurveBuy` / `CurveSell` since launch, continued with Uniswap v4 `Swap` events after graduation; trade-count or time candles |
 | Quote assets | **WORKING** | Launches paired with USDG, cbBTC or tokenized stocks are priced in their own asset (decimals read on-chain, USD from DexScreener) |
 | Ticker tape | **WORKING** | The most traded tokens of the last ten minutes, on every page |
