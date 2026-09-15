@@ -34,12 +34,12 @@ export type Candle = { t: number; o: number; h: number; l: number; c: number; bu
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errText = (e: unknown) => `${(e as any)?.details ?? ''} ${(e as any)?.message ?? e}`;
 
-/** eth_getLogs over [from, to]; halves the range when the RPC answers "exceeds limit of 10000". */
+/** eth_getLogs over [from, to]; halves the range when the RPC answers with a block-range limit (wording has changed before). */
 export async function logsSplit<T>(q: (from: bigint, to: bigint) => Promise<T[]>, from: bigint, to: bigint, depth = 0): Promise<T[]> {
   try {
     return await q(from, to);
   } catch (e) {
-    if (/exceeds limit/i.test(errText(e)) && to > from && depth < 14) {
+    if (/exceeds limit|allowed to search|too many blocks|block range/i.test(errText(e)) && to > from && depth < 14) {
       const mid = (from + to) / 2n;
       return [...(await logsSplit(q, from, mid, depth + 1)), ...(await logsSplit(q, mid + 1n, to, depth + 1))];
     }
