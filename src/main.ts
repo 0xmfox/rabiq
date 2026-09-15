@@ -191,7 +191,7 @@ function factsCard(d: Dossier, all: Dossier[]) {
       <dt>Creator tax</dt><dd>${v(c?.creatorTaxBps != null ? `${c.creatorTaxBps / 100}%` : '—')}</dd>
       <dt>FDV · Liquidity</dt><dd>${v(m ? `${usd(m.fdv)} · ${usd(m.liquidityUsd)}` : '—')}</dd>
       <dt>Volume 24h</dt><dd>${v(m ? usd(m.volume24h) : '—')}</dd>
-      <dt>Deployer launches</dt><dd>${v(s?.launchTotal ? `<span class="launch-total">${s.launchTotal.toLocaleString()} total${s.launchTotal > (s.launches?.length ?? 0) ? ` · latest ${Math.min(40, s.launchTotal)} shown` : ''}</span>${launches}` : launches)}</dd>
+      <dt>Deployer launches</dt><dd>${v(s?.launchTotal ? `<span class="launch-total">${s.launchTotal.toLocaleString()} in the last 2 days${s.launchTotal > (s.launches?.length ?? 0) ? ` · latest ${Math.min(40, s.launchTotal)} shown` : ''}</span>${launches}` : launches)}</dd>
       ${s?.repos.map((r) => `<dt>GitHub</dt><dd><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener noreferrer">${esc(r.repo)}</a> · <code>${esc(r.sha.slice(0, 7))}</code> · ${esc(r.message)} · ★${r.stars}</dd>`).join('') ?? ''}
     </dl></section>`;
 }

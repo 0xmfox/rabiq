@@ -320,7 +320,7 @@ export function mountLanding(root: HTMLElement): () => void {
   const alive = () => live && root.isConnected;
   const data: Promise<LandingData | null> = fetch('landing.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
-  requestAnimationFrame(() => root.querySelector('.lp')!.classList.add('ready'));
+  requestAnimationFrame(() => { if (alive()) root.querySelector('.lp')?.classList.add('ready'); });
   const stopFile = mountFile(root, data, alive);
   const stopNow = mountNow(root, alive);
   const stopRail = mountRail(root);

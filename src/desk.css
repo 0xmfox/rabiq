@@ -296,6 +296,8 @@ html.cur-text .cur-dot, html.cur-text .cur-ring { opacity: 0; }
 .const.play .const-edge { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 700ms var(--ease-in-out) forwards; animation-delay: calc(var(--i) * 18ms); }
 .const-core circle { fill: var(--surface-2); stroke: var(--border-2); }
 .const-core text { font: 500 9px var(--mono); fill: var(--muted); letter-spacing: 0.06em; }
+.const-node { cursor: grab; touch-action: none; }
+.const-node:active { cursor: grabbing; }
 .const-node circle { fill: var(--dim); transition: fill 0.15s ease, r 0.2s var(--ease-out); }
 .const-node.grad circle { fill: var(--sky); }
 .const-node.self circle { fill: var(--lime); filter: drop-shadow(0 0 6px rgba(184, 239, 69, 0.6)); }

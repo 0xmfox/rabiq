@@ -227,13 +227,18 @@ export async function curveTokens(curves: string[]): Promise<Map<string, string>
   return new Map(curves.flatMap((c, k) => (res[k].status === 'success' ? [[c.toLowerCase(), String(res[k].result).toLowerCase()] as [string, string]] : [])));
 }
 
-const CHUNK = 12_000_000n;
-/** Launch blocks of every Pons V2 token by these deployers, oldest first. */
+const CHUNK = 1_900n; // just under the RPC's per-request block-range cap (it has changed once already)
+// ponytail: a full genesis-to-head scan is tens of thousands of requests at a 2000-block cap.
+// Bounded to recent history so this finishes in the background; older history needs an indexed API, not brute log scans.
+const HISTORY_LOOKBACK = 1_700_000n; // ~2 days at the measured block time
+
+/** Launch blocks of every Pons V2 token by these deployers in the recent history window, oldest first. */
 export async function deployerLaunches(deployers: string[], head: bigint): Promise<Map<string, { token: string; block: number }[]>> {
   const out = new Map<string, { token: string; block: number }[]>(deployers.map((d) => [d, []]));
+  const start = head - HISTORY_LOOKBACK > FIRST_BLOCK ? head - HISTORY_LOOKBACK : FIRST_BLOCK;
   for (let i = 0; i < deployers.length; i += 40) {
     const group = deployers.slice(i, i + 40).map((d) => getAddress(d));
-    for (let from = FIRST_BLOCK; from <= head; from += CHUNK) {
+    for (let from = start; from <= head; from += CHUNK) {
       const to = from + CHUNK - 1n > head ? head : from + CHUNK - 1n;
       const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: group }, fromBlock: a, toBlock: b }), from, to);
       for (const l of logs) out.get(String(l.args.deployer).toLowerCase())?.push({ token: String(l.args.token).toLowerCase(), block: Number(l.blockNumber) });
@@ -243,12 +248,13 @@ export async function deployerLaunches(deployers: string[], head: bigint): Promi
   return out;
 }
 
-/** Launch block of tokens (indexed topic filter, three wide ranges). */
+/** Launch block of tokens in the recent history window (indexed topic filter). */
 export async function launchBlocks(tokens: string[], head: bigint): Promise<Map<string, { block: number; deployer: string }>> {
   const out = new Map<string, { block: number; deployer: string }>();
+  const start = head - HISTORY_LOOKBACK > FIRST_BLOCK ? head - HISTORY_LOOKBACK : FIRST_BLOCK;
   for (let i = 0; i < tokens.length; i += 60) {
     const group = tokens.slice(i, i + 60).map((t) => getAddress(t));
-    for (let from = FIRST_BLOCK; from <= head; from += CHUNK) {
+    for (let from = start; from <= head; from += CHUNK) {
       const to = from + CHUNK - 1n > head ? head : from + CHUNK - 1n;
       const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { token: group }, fromBlock: a, toBlock: b }), from, to);
       for (const l of logs) out.set(String(l.args.token).toLowerCase(), { block: Number(l.blockNumber), deployer: String(l.args.deployer).toLowerCase() });

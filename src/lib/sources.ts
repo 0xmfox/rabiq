@@ -1,6 +1,6 @@
 // Market data (DexScreener), repositories (GitHub REST API) and Pons V2 launch history.
 import { client, launchEvent, MULTICALL3, PONS_V2_FACTORY, readToken, retry, type ChainFacts } from './chain.ts';
-import { curveStates, curveTrades, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY, type Curve } from './pons.ts';
+import { curveStates, curveTrades, loadQuotes, logsSplit, poolId, poolTrades, quoteOf, SUPPLY, type Curve } from './pons.ts';
 import { parseAbi, getAddress } from 'viem';
 
 const DAY_BLOCKS = 850_000n; // ~24h at the measured ~0.1 s block time
@@ -94,18 +94,21 @@ export async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
 
 // First TokenLaunched event from the Pons V2 factory is at block 27,027,321.
 const PONS_V2_FIRST_BLOCK = 27_000_000n;
-const CHUNK = 12_000_000n;
+const CHUNK = 1_900n; // just under the RPC's per-request block-range cap (it has changed once already)
+// ponytail: a full genesis-to-head scan is tens of thousands of requests at a 2000-block cap.
+// Bounded to recent history so a dossier open finishes; older deployer history needs an indexed API, not brute log scans.
+const HISTORY_LOOKBACK = 1_700_000n; // ~2 days at the measured block time
 
-/** Every Pons V2 token this deployer launched, oldest first. Throws when the public RPC keeps throttling. */
+/** This deployer's Pons V2 launches in the recent history window, oldest first. */
 export async function launchTokens(deployer: string, headBlock?: number): Promise<`0x${string}`[]> {
   const head = headBlock ? BigInt(headBlock) : await retry(() => client.getBlockNumber());
-  const ranges: [bigint, bigint][] = [];
-  for (let from = PONS_V2_FIRST_BLOCK; from <= head; from += CHUNK) ranges.push([from, from + CHUNK - 1n > head ? head : from + CHUNK - 1n]);
-  // sequential, bounded ranges: the public RPC rate-limits bursts and drops very wide scans
+  const start = head - HISTORY_LOOKBACK > PONS_V2_FIRST_BLOCK ? head - HISTORY_LOOKBACK : PONS_V2_FIRST_BLOCK;
   const tokens: `0x${string}`[] = [];
-  for (const [fromBlock, toBlock] of ranges)
-    for (const l of await retry(() => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock, toBlock })))
-      tokens.push(l.args.token!);
+  for (let from = start; from <= head; from += CHUNK) {
+    const to = from + CHUNK - 1n > head ? head : from + CHUNK - 1n;
+    const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock: a, toBlock: b }), from, to);
+    for (const l of logs) tokens.push(l.args.token!);
+  }
   return tokens;
 }
 

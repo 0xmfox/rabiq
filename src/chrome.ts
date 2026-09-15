@@ -120,7 +120,7 @@ function mountCursor() {
     dot.style.transform = `translate(${x}px, ${y}px)`;
     const t = e.target as Element;
     const text = !!t.closest?.('input:not([type=checkbox]):not([type=file]), textarea, [contenteditable]');
-    const hot = !text && !!t.closest?.('a, button, label, summary, [data-act], .dt-row, .node, .tick, .chart svg, select');
+    const hot = !text && !!t.closest?.('a, button, label, summary, [data-act], .dt-row, .node, .const-node, .tick, .chart svg, select');
     document.documentElement.classList.toggle('cur-text', text);
     ring.classList.toggle('hot', hot);
     dot.classList.add('on'); ring.classList.add('on');
