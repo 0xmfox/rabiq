@@ -91,7 +91,8 @@ async function refresh(d: Dossier, force = false) {
     cur.name ||= snap.chain?.name ?? '';
     if (changes.length) logEvent(cur, `Refreshed: ${changes.length} change${changes.length === 1 ? '' : 's'}`);
     burrow.put(cur);
-    if (!snap.launches && snap.chain?.deployer) loadLaunchHistory(d.id, snap, snap.chain.deployer, snap.chain.block, d.ca);
+    // the previous list stays on screen while the whole-history query (one request) reads what's new
+    if (snap.chain?.deployer) loadLaunchHistory(d.id, snap, snap.chain.deployer, snap.chain.block, d.ca);
   } finally {
     loading.delete(d.id);
     render();
@@ -99,14 +100,18 @@ async function refresh(d: Dossier, force = false) {
 }
 
 // Deployer history is a slow, bounded log scan; it loads in the background so it never blocks the facts card.
+const historyTried = new Set<string>(); // once per check, so a render loop can't turn a failed read into a request storm
 async function loadLaunchHistory(id: string, snap: Snapshot, deployer: string, block: number, ca: string) {
+  if (historyTried.has(`${id}:${snap.at}`)) return;
+  historyTried.add(`${id}:${snap.at}`);
   let launches = await readLaunches(deployer, block, ca);
   if (!launches) { await new Promise((r) => setTimeout(r, 2000)); launches = await readLaunches(deployer, block, ca); }
   if (!launches) return;
-  const cur = burrow.get(id);
-  if (!cur || latest(cur) !== snap) return; // dossier gone, or a newer check already replaced this snapshot
-  snap.launches = launches.list;
-  snap.launchTotal = launches.total;
+  // burrow.get parses storage, so compare checks by timestamp, not identity (identity never matched: history was dropped)
+  const cur = burrow.get(id), last = cur && latest(cur);
+  if (!last || last.at !== snap.at) return; // dossier gone, or a newer check already replaced this snapshot
+  last.launches = launches.list;
+  last.launchTotal = launches.total;
   burrow.put(cur);
   render();
 }
@@ -205,7 +210,7 @@ function factsCard(d: Dossier, all: Dossier[]) {
       <dt>Creator tax</dt><dd>${v(c?.creatorTaxBps != null ? `${c.creatorTaxBps / 100}%` : '—')}</dd>
       <dt>FDV · Liquidity</dt><dd>${v(m ? `${usd(m.fdv)} · ${usd(m.liquidityUsd)}` : '—')}</dd>
       <dt>Volume 24h</dt><dd>${v(m ? usd(m.volume24h) : '—')}</dd>
-      <dt>Deployer launches</dt><dd>${v(s?.launchTotal ? `<span class="launch-total">${s.launchTotal.toLocaleString()} in the last 2 days${s.launchTotal > (s.launches?.length ?? 0) ? ` · latest ${Math.min(40, s.launchTotal)} shown` : ''}</span>${launches}` : launches)}</dd>
+      <dt>Deployer launches</dt><dd>${v(s?.launchTotal ? `<span class="launch-total">${s.launchTotal.toLocaleString()} total${s.launchTotal > (s.launches?.length ?? 0) ? ` · latest ${Math.min(40, s.launchTotal)} shown` : ''}</span>${launches}` : launches)}</dd>
       ${s?.repos.map((r) => `<dt>GitHub</dt><dd><a href="https://github.com/${esc(r.repo)}" target="_blank" rel="noopener noreferrer">${esc(r.repo)}</a> · <code>${esc(r.sha.slice(0, 7))}</code> · ${esc(r.message)} · ★${r.stars}</dd>`).join('') ?? ''}
     </dl></section>`;
 }
@@ -379,7 +384,10 @@ async function render() {
       let d = burrow.get(burrow.idFor(ca));
       if (!d) { d = burrow.blank(ca); burrow.put(d); }
       main = dossierView(d);
-      if (!d.demo && !loading.has(d.id) && (!latest(d) || Date.now() - latest(d)!.at > 10 * 60_000)) queueMicrotask(() => refresh(d!));
+      const snap = latest(d);
+      if (!d.demo && !loading.has(d.id) && (!snap || Date.now() - snap.at > 10 * 60_000)) queueMicrotask(() => refresh(d!));
+      // a recent check whose deployer history never landed: fetch just that, no full refresh
+      else if (!d.demo && snap && !snap.launches && snap.chain?.deployer) loadLaunchHistory(d.id, snap, snap.chain.deployer, snap.chain.block, d.ca);
     }
   } else if (r.startsWith('/s/')) {
     shared ??= await unpack(r.slice(3));

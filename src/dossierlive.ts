@@ -4,7 +4,7 @@ import { client } from './lib/chain.ts';
 import { desk } from './lib/desk.ts';
 import { esc } from './lib/md.ts';
 import {
-  calibrate, curveTrades, launchBlocks, launchRecords, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY,
+  calibrate, curveTrades, FIRST_BLOCK, launchRecords, loadQuotes, poolId, poolTrades, quoteOf, SUPPLY,
   type Quote, type Trade,
 } from './lib/pons.ts';
 import { short, ticker, type Snapshot } from './lib/sources.ts';
@@ -20,7 +20,7 @@ export function dossierLiveHTML(ca: string, s: Snapshot | undefined, intro: bool
     <div class="dlive-stats" data-dstats>${statsHTML(ca, s)}</div>
     <div class="dlive-grid">
       <div class="dlive-chart"><div class="dlive-head"><span class="label"><span>Chart</span>Every trade since launch</span><span class="muted small" data-dnote></span></div><div data-dchart><div class="chart-empty"><span class="spin"></span> Reading every trade since launch</div></div></div>
-      <div class="dlive-const"><div class="dlive-head"><span class="label"><span>Deployer</span>${c.deployer ? short(c.deployer) : '—'}</span><span class="muted small">${s?.launchTotal ? `${fmt(s.launchTotal)} launches · last 2 days` : ''}</span></div><div data-dconst>${constellationHTML(ca, s, cache.get(ca), intro)}</div></div>
+      <div class="dlive-const"><div class="dlive-head"><span class="label"><span>Deployer</span>${c.deployer ? short(c.deployer) : '—'}</span><span class="muted small">${s?.launchTotal ? `${fmt(s.launchTotal)} launch${s.launchTotal === 1 ? '' : 'es'}` : ''}</span></div><div data-dconst>${constellationHTML(ca, s, cache.get(ca), intro)}</div></div>
     </div>
   </section>`;
 }
@@ -130,14 +130,10 @@ async function load(ca: string, s: Snapshot, repaint: () => void) {
     await loadQuotes([pair]);
     live.quote = quoteOf(pair);
     const dec = live.quote?.decimals ?? 18;
-    // desk already knows the launch block for anything it has seen live; that's free. Otherwise chase it in the
-    // background — it is a bounded log scan — and paint immediately with a recent window instead of waiting on it.
+    // a curve only emits after its launch, so scanning its address from the first Pons V2 block is still one
+    // request and needs no launch-block lookup; the desk's known launch block just narrows it
     live.launchBlock ??= desk.tokens.get(ca.toLowerCase())?.launchBlock ?? null;
-    if (live.launchBlock == null) {
-      // cached for the next load (e.g. a manual refresh); this window's chart already painted with the fallback
-      launchBlocks([ca], head).then((m) => { const b = m.get(ca.toLowerCase())?.block; if (b != null) live.launchBlock = b; }).catch(() => null);
-    }
-    const from = BigInt(live.launchBlock ?? Number(head) - 100_000);
+    const from = live.launchBlock != null ? BigInt(live.launchBlock) : FIRST_BLOCK;
     const curve = c.curve ? await curveTrades(c.curve, from, head, dec) : [];
     let pool: Trade[] = [];
     if (c.phase === 'graduated' && c.poolFee != null && c.tickSpacing != null) {

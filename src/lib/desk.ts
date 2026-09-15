@@ -223,12 +223,12 @@ async function enrich(head: bigint) {
   try {
     // hot tokens first, then every launch in the window, so the repeat share covers them all over a few polls
     const ranked = rank('hot').slice(0, 60).concat(rank('new'));
-    const needBlock = [...new Set(ranked.filter((t) => t.launchBlock == null).map((t) => t.token))].slice(0, 60);
+    const needBlock = [...new Set(ranked.filter((t) => t.launchBlock == null).map((t) => t.token))].slice(0, 20);
     if (needBlock.length) {
       const blocks = await launchBlocks(needBlock, head);
       for (const [token, b] of blocks) { const t = desk.tokens.get(token); if (t) t.launchBlock = b.block; }
     }
-    const needDep = [...new Set(ranked.filter((t) => !deployers.has(t.deployer)).map((t) => t.deployer))].slice(0, 40);
+    const needDep = [...new Set(ranked.filter((t) => !deployers.has(t.deployer)).map((t) => t.deployer))].slice(0, 20);
     if (needDep.length) {
       const hist = await deployerLaunches(needDep, head);
       for (const [d, list] of hist) deployers.set(d, list.map((x) => x.block));

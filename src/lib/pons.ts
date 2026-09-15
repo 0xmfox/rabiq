@@ -34,17 +34,28 @@ export type Candle = { t: number; o: number; h: number; l: number; c: number; bu
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errText = (e: unknown) => `${(e as any)?.details ?? ''} ${(e as any)?.message ?? e}`;
 
-/** eth_getLogs over [from, to]; halves the range when the RPC answers with a block-range limit (wording has changed before). */
+/**
+ * eth_getLogs over [from, to] in one request when the RPC allows it; halves the range when it answers with a result cap,
+ * a block-range cap or a query timeout (all three wordings seen on the public RPC).
+ */
 export async function logsSplit<T>(q: (from: bigint, to: bigint) => Promise<T[]>, from: bigint, to: bigint, depth = 0): Promise<T[]> {
-  try {
-    return await q(from, to);
-  } catch (e) {
-    if (/exceeds limit|allowed to search|too many blocks|block range/i.test(errText(e)) && to > from && depth < 14) {
-      const mid = (from + to) / 2n;
-      return [...(await logsSplit(q, from, mid, depth + 1)), ...(await logsSplit(q, mid + 1n, to, depth + 1))];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await q(from, to);
+    } catch (e) {
+      const msg = errText(e);
+      const capped = /exceeds limit|allowed to search|too many blocks|block range/i.test(msg);
+      const slow = /timed out|deadline exceeded/i.test(msg);
+      // the node gives a query ~2 s; a timed-out range usually answers on the next try once it is warm, which is
+      // cheaper than splitting it into a tree of cold halves
+      if (slow && attempt < 2) { await sleep(700); continue; }
+      if ((capped || slow) && to > from && depth < 16) {
+        const mid = (from + to) / 2n;
+        return [...(await logsSplit(q, from, mid, depth + 1)), ...(await logsSplit(q, mid + 1n, to, depth + 1))];
+      }
+      if (attempt === 0) { await sleep(1600); continue; }
+      throw e;
     }
-    await sleep(1600);
-    return q(from, to);
   }
 }
 
@@ -227,38 +238,30 @@ export async function curveTokens(curves: string[]): Promise<Map<string, string>
   return new Map(curves.flatMap((c, k) => (res[k].status === 'success' ? [[c.toLowerCase(), String(res[k].result).toLowerCase()] as [string, string]] : [])));
 }
 
-const CHUNK = 1_900n; // just under the RPC's per-request block-range cap (it has changed once already)
-// ponytail: a full genesis-to-head scan is tens of thousands of requests at a 2000-block cap.
-// Bounded to recent history so this finishes in the background; older history needs an indexed API, not brute log scans.
-const HISTORY_LOOKBACK = 1_700_000n; // ~2 days at the measured block time
+// Indexed topic filters (a deployer, a token) cover the whole Pons V2 history in one request; logsSplit only splits
+// when a group matches more than the RPC's 10k-log cap or times out. Never pre-chunk these by block range:
+// 1,900-block chunks turned one request into thousands and left the desk and dossiers loading for minutes.
+const GROUP = 20;
 
-/** Launch blocks of every Pons V2 token by these deployers in the recent history window, oldest first. */
+/** Launch blocks of every Pons V2 token by these deployers, oldest first. */
 export async function deployerLaunches(deployers: string[], head: bigint): Promise<Map<string, { token: string; block: number }[]>> {
   const out = new Map<string, { token: string; block: number }[]>(deployers.map((d) => [d, []]));
-  const start = head - HISTORY_LOOKBACK > FIRST_BLOCK ? head - HISTORY_LOOKBACK : FIRST_BLOCK;
-  for (let i = 0; i < deployers.length; i += 40) {
-    const group = deployers.slice(i, i + 40).map((d) => getAddress(d));
-    for (let from = start; from <= head; from += CHUNK) {
-      const to = from + CHUNK - 1n > head ? head : from + CHUNK - 1n;
-      const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: group }, fromBlock: a, toBlock: b }), from, to);
-      for (const l of logs) out.get(String(l.args.deployer).toLowerCase())?.push({ token: String(l.args.token).toLowerCase(), block: Number(l.blockNumber) });
-    }
+  for (let i = 0; i < deployers.length; i += GROUP) {
+    const group = deployers.slice(i, i + GROUP).map((d) => getAddress(d));
+    const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: group }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
+    for (const l of logs) out.get(String(l.args.deployer).toLowerCase())?.push({ token: String(l.args.token).toLowerCase(), block: Number(l.blockNumber) });
   }
   for (const list of out.values()) list.sort((a, b) => a.block - b.block);
   return out;
 }
 
-/** Launch block of tokens in the recent history window (indexed topic filter). */
+/** Launch block of tokens (indexed topic filter). */
 export async function launchBlocks(tokens: string[], head: bigint): Promise<Map<string, { block: number; deployer: string }>> {
   const out = new Map<string, { block: number; deployer: string }>();
-  const start = head - HISTORY_LOOKBACK > FIRST_BLOCK ? head - HISTORY_LOOKBACK : FIRST_BLOCK;
-  for (let i = 0; i < tokens.length; i += 60) {
-    const group = tokens.slice(i, i + 60).map((t) => getAddress(t));
-    for (let from = start; from <= head; from += CHUNK) {
-      const to = from + CHUNK - 1n > head ? head : from + CHUNK - 1n;
-      const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { token: group }, fromBlock: a, toBlock: b }), from, to);
-      for (const l of logs) out.set(String(l.args.token).toLowerCase(), { block: Number(l.blockNumber), deployer: String(l.args.deployer).toLowerCase() });
-    }
+  for (let i = 0; i < tokens.length; i += GROUP) {
+    const group = tokens.slice(i, i + GROUP).map((t) => getAddress(t));
+    const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { token: group }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
+    for (const l of logs) out.set(String(l.args.token).toLowerCase(), { block: Number(l.blockNumber), deployer: String(l.args.deployer).toLowerCase() });
   }
   return out;
 }

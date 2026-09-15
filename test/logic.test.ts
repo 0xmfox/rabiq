@@ -63,3 +63,19 @@ test('share: roundtrip, private fields stay home, hostile input is cleaned', asy
 test('md: escapes html', () => {
   assert.equal(md('<script>x</script> **b**'), '<p>&lt;script&gt;x&lt;/script&gt; <strong>b</strong></p>');
 });
+
+test('logsSplit: one request when allowed, retries a timeout before splitting, splits a result cap at once', async () => {
+  const { logsSplit } = await import('../src/lib/pons.ts');
+  const calls: string[] = [];
+  const ok = await logsSplit(async (a, b) => { calls.push(`${a}-${b}`); return [a]; }, 0n, 1000n);
+  assert.deepEqual([ok, calls], [[0n], ['0-1000']]);
+
+  calls.length = 0;
+  let timeouts = 1;
+  await logsSplit(async (a, b) => { calls.push(`${a}-${b}`); if (timeouts-- > 0) throw new Error('log query timed out'); return []; }, 0n, 1000n);
+  assert.deepEqual(calls, ['0-1000', '0-1000'], 'a warm retry answers without splitting');
+
+  calls.length = 0;
+  const out = await logsSplit(async (a, b) => { calls.push(`${a}-${b}`); if (b - a > 500n) throw new Error('logs matched by query exceeds limit of 10000'); return [a]; }, 0n, 1000n);
+  assert.deepEqual([out, calls], [[0n, 501n], ['0-1000', '0-500', '501-1000']]);
+});

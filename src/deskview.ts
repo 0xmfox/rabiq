@@ -3,7 +3,7 @@ import { areaLine, ethShort, mountChart, sparkline, usdShort } from './chart.ts'
 import { EXPLORER } from './lib/chain.ts';
 import { buys, change, desk, mcap, onDesk, priceOf, quoteSym, rank, stats, traders, usdPer, vol, WINDOW, type Sort, type Tok } from './lib/desk.ts';
 import { esc } from './lib/md.ts';
-import { blockTime, curveTrades, hasClock, launchBlocks, SUPPLY, type Trade } from './lib/pons.ts';
+import { blockTime, curveTrades, FIRST_BLOCK, hasClock, SUPPLY, type Trade } from './lib/pons.ts';
 import { short, ticker } from './lib/sources.ts';
 
 const ETH = '0x0000000000000000000000000000000000000000';
@@ -136,10 +136,8 @@ async function loadHistory(t: Tok, repaint: () => void) {
   history.set(t.token, { trades: h?.trades ?? t.trades.slice(), loading: true });
   try {
     const head = BigInt(desk.head);
-    let from = t.launchBlock;
-    if (from == null) from = (await launchBlocks([t.token], head)).get(t.token)?.block ?? desk.head - WINDOW;
-    t.launchBlock ??= from;
-    const trades = await curveTrades(t.curve, BigInt(from), head, t.dec);
+    // the curve address only emits after launch: from the first Pons V2 block is one request, no launch-block lookup
+    const trades = await curveTrades(t.curve, t.launchBlock != null ? BigInt(t.launchBlock) : FIRST_BLOCK, head, t.dec);
     history.set(t.token, { trades, loading: false });
   } catch {
     history.set(t.token, { trades: h?.trades ?? t.trades.slice(), loading: false });

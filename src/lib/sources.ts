@@ -1,6 +1,6 @@
 // Market data (DexScreener), repositories (GitHub REST API) and Pons V2 launch history.
 import { client, launchEvent, MULTICALL3, PONS_V2_FACTORY, readToken, retry, type ChainFacts } from './chain.ts';
-import { curveStates, curveTrades, loadQuotes, logsSplit, poolId, poolTrades, quoteOf, SUPPLY, type Curve } from './pons.ts';
+import { curveStates, curveTrades, FIRST_BLOCK, loadQuotes, logsSplit, poolId, poolTrades, quoteOf, SUPPLY, type Curve } from './pons.ts';
 import { parseAbi, getAddress } from 'viem';
 
 const DAY_BLOCKS = 850_000n; // ~24h at the measured ~0.1 s block time
@@ -92,24 +92,11 @@ export async function withSymbols(tokens: `0x${string}`[]): Promise<Launch[]> {
   return tokens.map((t, i) => ({ token: t.toLowerCase(), symbol: res[i].status === 'success' ? String(res[i].result) : '?' }));
 }
 
-// First TokenLaunched event from the Pons V2 factory is at block 27,027,321.
-const PONS_V2_FIRST_BLOCK = 27_000_000n;
-const CHUNK = 1_900n; // just under the RPC's per-request block-range cap (it has changed once already)
-// ponytail: a full genesis-to-head scan is tens of thousands of requests at a 2000-block cap.
-// Bounded to recent history so a dossier open finishes; older deployer history needs an indexed API, not brute log scans.
-const HISTORY_LOOKBACK = 1_700_000n; // ~2 days at the measured block time
-
-/** This deployer's Pons V2 launches in the recent history window, oldest first. */
+/** Every Pons V2 launch by this deployer, oldest first: one indexed log query over the whole history. */
 export async function launchTokens(deployer: string, headBlock?: number): Promise<`0x${string}`[]> {
   const head = headBlock ? BigInt(headBlock) : await retry(() => client.getBlockNumber());
-  const start = head - HISTORY_LOOKBACK > PONS_V2_FIRST_BLOCK ? head - HISTORY_LOOKBACK : PONS_V2_FIRST_BLOCK;
-  const tokens: `0x${string}`[] = [];
-  for (let from = start; from <= head; from += CHUNK) {
-    const to = from + CHUNK - 1n > head ? head : from + CHUNK - 1n;
-    const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock: a, toBlock: b }), from, to);
-    for (const l of logs) tokens.push(l.args.token!);
-  }
-  return tokens;
+  const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, args: { deployer: getAddress(deployer) }, fromBlock: a, toBlock: b }), FIRST_BLOCK, head);
+  return logs.map((l) => l.args.token!);
 }
 
 /** The deployer's latest 40 launches plus `self` when it is older, and the total count. */

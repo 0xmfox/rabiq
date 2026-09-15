@@ -33,7 +33,20 @@ async function spacedFetch(input: RequestInfo | URL, init?: RequestInit) {
   const wait = Math.max(0, nextSlot - now);
   nextSlot = Math.max(now, nextSlot) + GAP_MS;
   if (wait) await new Promise((r) => setTimeout(r, wait));
-  return fetch(input, init);
+  try {
+    const r = await fetch(input, init);
+    if (r.status === 429) throttled();
+    return r;
+  } catch (e) {
+    throttled();
+    throw e;
+  }
+}
+// a throttled answer (in the browser a 429 arrives as a CORS failure) pauses the whole queue, not just the one caller:
+// otherwise every other pending read walks straight into the same limit
+const PAUSE_MS = 1_200;
+function throttled() {
+  nextSlot = Math.max(nextSlot, Date.now() + PAUSE_MS);
 }
 
 export const client = createPublicClient({
@@ -43,7 +56,8 @@ export const client = createPublicClient({
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     rpcUrls: { default: { http: [RPC_URL] } },
   },
-  transport: http(RPC_URL, { retryCount: 3, retryDelay: 1200, fetchFn: spacedFetch }),
+  // a cold whole-history log query can take 10-20 s on the RPC; viem's default 10 s timeout aborted it and the retry hit 429
+  transport: http(RPC_URL, { retryCount: 3, retryDelay: 1200, timeout: 30_000, fetchFn: spacedFetch }),
 });
 
 const factoryAbi = parseAbi([
