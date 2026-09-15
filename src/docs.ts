@@ -32,6 +32,18 @@ const HOW: Sec[] = [
   { id: 'file', title: 'Open the file', body: `
     <p><b>Open the file</b> creates a dossier for the contract. RABIQ reads the launch record, the market, the curve and the deployer's history, then leaves space for your research:</p>
     <ol class="doc-ol"><li>A one-line thesis, arguments for and against.</li><li>Open questions. The first unanswered one is marked <b>next</b>.</li><li>A decision: Watching, Researching, In position or Passed, with a private reason.</li><li>Sources. A GitHub link adds the repository head commit to every check.</li></ol>` },
+  { id: 'flow', title: 'Read the flow', body: `
+    <p>Every Pons V2 dossier reads each curve trade since launch, and each Uniswap v4 swap after graduation, then works out who traded it. Nothing here needs another request.</p>
+    <dl class="doc-dl wide">
+      <dt>Bought · Sold</dt><dd>Quote volume on each side and the net flow between them.</dd>
+      <dt>Buyers · sellers</dt><dd>Distinct wallets that bought and that sold. Close to equal on a busy token often means the same wallets on both sides.</dd>
+      <dt>Top 10 wallets</dt><dd>The share of volume from the ten busiest wallets.</dd>
+      <dt>Deployer traded</dt><dd>What the deployer's wallet bought and sold on its own token.</dd>
+      <dt>Pressure</dt><dd>Buy volume above the line, sell volume below, per time bucket, with the running net flow drawn across.</dd>
+      <dt>Wallets</dt><dd>The 24 busiest wallets as bubbles sized by volume. Lime ended as a net buyer, red as a net seller, the ringed one is the deployer. Click one to open it on Blockscout.</dd>
+      <dt>Top wallets</dt><dd>Bought, sold, net, trades and share per wallet, tagged <b>Deployer</b>, <b>Fee recipient</b> or <b>Early</b> for a wallet among the first 20 trades.</dd>
+    </dl>
+    <p>A v4 swap names the router that sent it, not the trader, so wallet figures on a graduated token come from its curve trades.</p>` },
   { id: 'return', title: 'Come back', body: `
     <p>Open the same contract later and <b>Since your last check</b> lists what moved: market cap, liquidity, graduation, a new fee recipient, new commits, new launches by the deployer.</p>` },
   { id: 'remember', title: 'Meet the deployer again', body: `
