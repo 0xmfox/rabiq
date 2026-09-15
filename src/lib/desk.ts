@@ -138,21 +138,15 @@ async function poll() {
     }
   }
 
-  // graduations: a day of history once, then incremental
-  const gradFrom = first ? head - 850_000n : from;
-  const grads = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: gradEvent, fromBlock: a, toBlock: b }), gradFrom, head).catch(() => []);
+  // graduations in the same window as everything else above; the fuller day of history backfills after ready (below)
+  const grads = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: gradEvent, fromBlock: a, toBlock: b }), from, head).catch(() => []);
   for (const g of grads) {
     const token = String(g.args.token).toLowerCase();
     desk.graduations.push({ token, block: Number(g.blockNumber) });
     const t = desk.tokens.get(token);
     if (t) t.phase = 2;
   }
-
-  const unnamed = desk.graduations.filter((g) => g.symbol === undefined);
-  if (unnamed.length) {
-    const recs = await launchRecords(unnamed.map((g) => g.token)).catch(() => new Map());
-    for (const g of unnamed) g.symbol = recs.get(g.token)?.symbol ?? desk.tokens.get(g.token)?.symbol ?? '';
-  }
+  await nameGraduations();
 
   // prune the window
   const floor = Number(head) - WINDOW;
@@ -189,6 +183,36 @@ async function poll() {
   desk.loadedAt = Date.now();
   emit();
   enrich(head);
+  if (first) backfillGraduations(head);
+}
+
+async function nameGraduations() {
+  const unnamed = desk.graduations.filter((g) => g.symbol === undefined);
+  if (!unnamed.length) return;
+  const recs = await launchRecords(unnamed.map((g) => g.token)).catch(() => new Map());
+  for (const g of unnamed) g.symbol = recs.get(g.token)?.symbol ?? desk.tokens.get(g.token)?.symbol ?? '';
+}
+
+let backfilling = false;
+/** A day of graduation history, once. Runs after the desk is already ready, so the first paint never waits on it. */
+async function backfillGraduations(head: bigint) {
+  if (backfilling) return;
+  backfilling = true;
+  try {
+    const grads = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: gradEvent, fromBlock: a, toBlock: b }), head - 850_000n, head).catch(() => []);
+    for (const g of grads) {
+      const token = String(g.args.token).toLowerCase();
+      if (desk.graduations.some((x) => x.token === token && x.block === Number(g.blockNumber))) continue;
+      desk.graduations.push({ token, block: Number(g.blockNumber) });
+      const t = desk.tokens.get(token);
+      if (t) t.phase = 2;
+    }
+    await nameGraduations();
+    desk.graduations = desk.graduations.filter((g) => g.block > Number(head) - 850_000);
+    emit();
+  } finally {
+    backfilling = false;
+  }
 }
 
 let enriching = false;

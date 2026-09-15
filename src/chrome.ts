@@ -1,4 +1,4 @@
-// Site chrome that outlives page renders: the header, the ticker tape and the cursor.
+// Site chrome that outlives page renders: the header and the ticker tape.
 import { blockText } from './lib/live.ts';
 import { change, onDesk, priceOf, rank } from './lib/desk.ts';
 import { esc } from './lib/md.ts';
@@ -10,7 +10,6 @@ export const REPO_URL = 'https://github.com/0xmfox/rabiq';
 export const X_URL = 'https://x.com/0xMfox';
 
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-const fine = () => matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 export const ICON = {
   github: '<svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>',
@@ -51,7 +50,6 @@ export function mountChrome(host: HTMLElement, onDig: (ca: string) => void) {
   });
 
   mountTape(host.querySelector('.tape')!);
-  if (fine() && !reduced()) mountCursor();
 }
 
 export function syncChrome(route: string) {
@@ -100,33 +98,4 @@ function mountTape(el: HTMLElement) {
     if (first || reduced()) { apply(html); first = false; el.classList.add('live'); }
     else pending = html;
   });
-}
-
-// ---------- cursor ----------
-function mountCursor() {
-  const dot = document.createElement('div'), ring = document.createElement('div');
-  dot.className = 'cur-dot'; ring.className = 'cur-ring';
-  document.body.append(ring, dot);
-  document.documentElement.classList.add('has-cursor');
-  let x = -100, y = -100, rx = -100, ry = -100, raf = 0;
-  const loop = () => {
-    rx += (x - rx) * 0.2; ry += (y - ry) * 0.2;
-    ring.style.transform = `translate(${rx}px, ${ry}px)`;
-    raf = Math.abs(x - rx) + Math.abs(y - ry) > 0.3 ? requestAnimationFrame(loop) : 0;
-  };
-  addEventListener('pointermove', (e) => {
-    if (e.pointerType !== 'mouse') return;
-    x = e.clientX; y = e.clientY;
-    dot.style.transform = `translate(${x}px, ${y}px)`;
-    const t = e.target as Element;
-    const text = !!t.closest?.('input:not([type=checkbox]):not([type=file]), textarea, [contenteditable]');
-    const hot = !text && !!t.closest?.('a, button, label, summary, [data-act], .dt-row, .node, .const-node, .tick, .chart svg, select');
-    document.documentElement.classList.toggle('cur-text', text);
-    ring.classList.toggle('hot', hot);
-    dot.classList.add('on'); ring.classList.add('on');
-    if (!raf) raf = requestAnimationFrame(loop);
-  }, { passive: true });
-  addEventListener('pointerdown', () => ring.classList.add('press'), { passive: true });
-  addEventListener('pointerup', () => ring.classList.remove('press'), { passive: true });
-  document.addEventListener('pointerleave', () => { dot.classList.remove('on'); ring.classList.remove('on'); });
 }

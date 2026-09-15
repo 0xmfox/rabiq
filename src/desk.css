@@ -40,17 +40,6 @@ a.tape-item:hover b { color: var(--lime); }
 .tape-item.idle { opacity: 0.45; }
 .tape.live .tape-set { animation: fade 500ms ease both; }
 
-html.has-cursor, html.has-cursor * { cursor: none !important; }
-html.has-cursor.cur-text input, html.has-cursor.cur-text textarea { cursor: text !important; }
-.cur-dot, .cur-ring { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; opacity: 0; transition: opacity 200ms ease; }
-.cur-dot { width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--lime); }
-.cur-ring { width: 30px; height: 30px; margin: -15px 0 0 -15px; }
-.cur-ring::before { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(184, 239, 69, 0.55); transition: transform 260ms var(--ease-out), border-color 200ms ease, background 200ms ease; }
-.cur-dot.on, .cur-ring.on { opacity: 1; }
-.cur-ring.hot::before { transform: scale(1.55); border-color: rgba(184, 239, 69, 0.8); background: rgba(184, 239, 69, 0.06); }
-.cur-ring.press::before { transform: scale(0.8); }
-html.cur-text .cur-dot, html.cur-text .cur-ring { opacity: 0; }
-
 /* ---------- desk ---------- */
 .layout.full { grid-template-columns: minmax(0, 1fr); }
 .desk { display: flex; flex-direction: column; gap: 40px; }

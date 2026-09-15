@@ -11,7 +11,7 @@ import { demoBurrow } from './lib/demo.ts';
 import { findLinks, linksOf, type Link } from './lib/links.ts';
 import { esc, md } from './lib/md.ts';
 import { adopt, pack, publish, unpack, type Published } from './lib/share.ts';
-import { diffSnapshots, short, takeSnapshot, ticker, usd } from './lib/sources.ts';
+import { diffSnapshots, readLaunches, short, takeSnapshot, ticker, usd, type Snapshot } from './lib/sources.ts';
 import { renderGraph } from './graph.ts';
 import { landingHTML, mountLanding } from './landing.ts';
 import { seedBlock, startBlockTicker } from './lib/live.ts';
@@ -82,7 +82,7 @@ async function refresh(d: Dossier, force = false) {
     const cur = burrow.get(d.id) ?? d;
     if (!snap.chain && !snap.market) failed.add(d.id);
     const prev = latest(cur);
-    if (!snap.launches && prev?.launches && prev.chain?.deployer === snap.chain?.deployer) { snap.launches = prev.launches; snap.launchTotal = prev.launchTotal; }
+    if (prev?.launches && prev.chain?.deployer === snap.chain?.deployer) { snap.launches = prev.launches; snap.launchTotal = prev.launchTotal; }
     const changes = prev ? diffSnapshots(prev, snap) : [];
     // keep the previous check around until something actually moves, so "since last check" survives reloads
     if (prev && !changes.length && cur.snapshots.length > 1) cur.snapshots[cur.snapshots.length - 1] = snap;
@@ -91,10 +91,24 @@ async function refresh(d: Dossier, force = false) {
     cur.name ||= snap.chain?.name ?? '';
     if (changes.length) logEvent(cur, `Refreshed: ${changes.length} change${changes.length === 1 ? '' : 's'}`);
     burrow.put(cur);
+    if (!snap.launches && snap.chain?.deployer) loadLaunchHistory(d.id, snap, snap.chain.deployer, snap.chain.block, d.ca);
   } finally {
     loading.delete(d.id);
     render();
   }
+}
+
+// Deployer history is a slow, bounded log scan; it loads in the background so it never blocks the facts card.
+async function loadLaunchHistory(id: string, snap: Snapshot, deployer: string, block: number, ca: string) {
+  let launches = await readLaunches(deployer, block, ca);
+  if (!launches) { await new Promise((r) => setTimeout(r, 2000)); launches = await readLaunches(deployer, block, ca); }
+  if (!launches) return;
+  const cur = burrow.get(id);
+  if (!cur || latest(cur) !== snap) return; // dossier gone, or a newer check already replaced this snapshot
+  snap.launches = launches.list;
+  snap.launchTotal = launches.total;
+  burrow.put(cur);
+  render();
 }
 
 function dig(input: string) {

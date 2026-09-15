@@ -126,13 +126,15 @@ export async function readLaunches(deployer: string, headBlock?: number, self?: 
   }
 }
 
-/** Newest Pons V2 launches (~20/min on mainnet, so a few thousand blocks is plenty). */
+/** Newest Pons V2 launches (~20/min on mainnet, so a couple thousand blocks is plenty). */
 export async function readFreshLaunches(n = 6): Promise<Launch[]> {
   const head = await retry(() => client.getBlockNumber());
-  const logs = await retry(() => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, fromBlock: head - 3000n, toBlock: head }));
+  const logs = await logsSplit((a, b) => client.getLogs({ address: PONS_V2_FACTORY, event: launchEvent, fromBlock: a, toBlock: b }), head - 1_900n, head);
   return withSymbols(logs.slice(-n).reverse().map((l) => l.args.token!));
 }
 
+// Deployer history is a bounded log scan (hundreds of paced requests) — far slower than the eth_call facts
+// below. takeSnapshot never waits on it; the caller fetches it separately so the facts card isn't held hostage.
 export async function takeSnapshot(ca: string, repoUrls: string[]): Promise<Snapshot> {
   const repos = [...new Set(repoUrls.map(parseRepo).filter((r): r is string => !!r))];
   const [chain, market, repoFacts] = await Promise.all([
@@ -140,14 +142,8 @@ export async function takeSnapshot(ca: string, repoUrls: string[]): Promise<Snap
     readMarket(ca).catch(() => null),
     Promise.all(repos.map(readRepo)),
   ]);
-  // a token is always one of its own deployer's launches; a list without it is a failed read, so try once more
-  let launches = chain?.deployer ? await readLaunches(chain.deployer, chain.block, ca) : null;
-  if (chain?.deployer && !launches) {
-    await new Promise((r) => setTimeout(r, 2000));
-    launches = await readLaunches(chain.deployer, chain.block, ca);
-  }
   const { curve, market: ponsMarket } = chain?.launchpad ? await ponsMarketOf(ca, chain, market).catch(() => ({ curve: null, market: null })) : { curve: null, market: null };
-  return { at: Date.now(), chain, market: market ?? ponsMarket, repos: repoFacts.filter((r): r is RepoFacts => !!r), launches: launches?.list ?? null, launchTotal: launches?.total ?? null, curve };
+  return { at: Date.now(), chain, market: market ?? ponsMarket, repos: repoFacts.filter((r): r is RepoFacts => !!r), launches: null, launchTotal: null, curve };
 }
 
 /** DexScreener has no pair while a token is on the curve: price it from the curve reserves and its trades. */
